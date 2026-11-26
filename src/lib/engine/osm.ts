@@ -98,7 +98,7 @@ export function filtersFor(category: string): string[] {
 export function buildOverpassQuery(category: string, lat: number, lng: number, radiusM: number, limit: number): string {
   const r = Math.round(Math.min(50000, Math.max(100, radiusM)));
   const parts = filtersFor(category).map((f) => `nwr${f}["name"](around:${r},${lat.toFixed(6)},${lng.toFixed(6)});`).join("\n  ");
-  return `[out:json][timeout:40];\n(\n  ${parts}\n);\nout center tags ${Math.max(1, Math.min(1000, limit))};`;
+  return `[out:json][timeout:25];\n(\n  ${parts}\n);\nout center tags ${Math.max(1, Math.min(1000, limit))};`;
 }
 
 const clean = (v?: string) => (v && v.trim() ? v.trim() : null);
@@ -212,7 +212,7 @@ export async function overpassSearch(query: string): Promise<OsmElement[]> {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(query),
-        signal: AbortSignal.timeout(50_000),
+        signal: AbortSignal.timeout(35_000),
       });
       if (res.status === 429 || res.status === 504) { lastErr = `HTTP ${res.status} (servidor ocupado)`; continue; }
       if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }

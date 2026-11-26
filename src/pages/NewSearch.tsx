@@ -47,7 +47,13 @@ export function NewSearchPage() {
       };
       const cats = [...f.categories, f.custom.trim()].filter(Boolean);
       const name = `${cats.slice(0, 3).join(", ")}${cats.length > 3 ? ` +${cats.length - 3}` : ""} — ${f.city || "ponto no mapa"}${f.state ? "/" + f.state : ""}`;
-      const jobId = await runner.createJob(name, "search", [{ type: "search", params, auto_audit: f.autoAudit }]);
+      // Uma pesquisa por categoria: progresso visível, resultados parciais e retentativa individual
+      const perCategory = Math.max(10, Math.ceil(f.max / cats.length));
+      const items = cats.map((c) => ({
+        type: "search" as const, auto_audit: f.autoAudit,
+        params: { ...params, categories: f.categories.includes(c) ? [c] : [], custom_category: f.categories.includes(c) ? "" : c, max_results: perCategory },
+      }));
+      const jobId = await runner.createJob(name, "search", items);
       toast.success("Pesquisa iniciada! Acompanhe o progresso em tempo real.");
       nav(`/lote/${jobId}?filter=${f.filter}`);
     } catch (err) {

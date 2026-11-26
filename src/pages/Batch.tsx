@@ -137,6 +137,7 @@ export function BatchDetailPage() {
   const searches = items.filter((i: any) => i.payload.type === "search");
   const audits = items.filter((i: any) => i.payload.type === "audit");
   const pct = j.total_items ? ((j.done_items + j.failed_items) / j.total_items) * 100 : 0;
+  const running = items.filter((i: any) => i.status === "running");
   const filter = sp.get("filter");
   const searchIds = searches.map((s: any) => s.result?.search_id).filter(Boolean);
   const icon = (s: string) => s === "done" ? <CheckCircle2 className="size-4 text-lime-400" /> : s === "failed" ? <AlertCircle className="size-4 text-rose-400" /> : s === "running" ? <Loader2 className="size-4 animate-spin text-lime-400" /> : s === "cancelled" ? <XCircle className="size-4 text-ink-500" /> : <Clock className="size-4 text-ink-400" />;
@@ -150,6 +151,11 @@ export function BatchDetailPage() {
           <span className="heading text-2xl text-white">{Math.round(pct)}%</span>
         </div>
         <ProgressBar className="mt-3 h-3" value={pct} />
+        {running.length > 0 && (
+          <p className="mt-2 text-xs text-ink-300 flex items-center gap-2"><Loader2 className="size-3.5 animate-spin text-lime-400" />
+            {running.map((i: any) => i.payload.type === "search" ? `Consultando OpenStreetMap: ${[...(i.payload.params.categories ?? []), i.payload.params.custom_category].filter(Boolean).join(", ")}` : "Analisando presença digital").join(" · ")}
+          </p>
+        )}
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5 text-center">
           {[["Itens", j.total_items], ["Concluídos", j.done_items], ["Falhas", j.failed_items], ["Encontrados", j.found_count], ["Analisados", j.analyzed_count]].map(([l, v]) => (
             <div key={l as string} className="rounded-xl bg-white/[0.03] p-3"><div className="heading text-xl text-white">{v as number}</div><div className="text-[11px] text-ink-400">{l}</div></div>
