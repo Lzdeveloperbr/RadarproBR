@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Users, Plus, CheckCircle2, Circle, Trash2, MessageSquare } from "lucide-react";
-import { supabase } from "../../lib/supabase";
-import { useAuth } from "../../hooks/useAuth";
+import { db, uid, nowIso, ensureLead, updateLead } from "../../lib/db";
 import { LEAD_STATUS, leadStatusLabel } from "../../lib/constants";
 import { Button, Card, CardHeader, Field, Toggle } from "../ui";
 import { fmtDateTime } from "../../lib/format";
@@ -12,46 +11,35 @@ import type { Lead } from "../../lib/types";
 const NOTE_KINDS = [["note", "Observação"], ["call", "Ligação"], ["whatsapp", "WhatsApp"], ["email", "E-mail"], ["meeting", "Reunião"], ["visit", "Visita"], ["proposal", "Proposta"]] as const;
 
 export function CrmPanel({ businessId }: { businessId: string }) {
-  const { orgId, user } = useAuth();
   const qc = useQueryClient();
   const lead = useQuery({
     queryKey: ["lead", businessId],
-    queryFn: async () => {
-      const { data } = await supabase.from("leads").select("*").eq("business_id", businessId).maybeSingle();
-      if (data) return data as Lead;
-      const { data: created, error } = await supabase.from("leads").insert({ organization_id: orgId, business_id: businessId, status: "novo" }).select().single();
-      if (error) throw error;
-      return created as Lead;
-    },
+    queryFn: () => ensureLead(businessId),
   });
   const notes = useQuery({
     queryKey: ["lead_notes", lead.data?.id],
     enabled: !!lead.data,
-    queryFn: async () => (await supabase.from("lead_notes").select("*").eq("lead_id", lead.data!.id).order("created_at", { ascending: false })).data ?? [],
+    queryFn: async () => (await db.lead_notes.where("lead_id").equals(lead.data!.id).toArray()).sort((a, b) => b.created_at.localeCompare(a.created_at)),
   });
   const tasks = useQuery({
     queryKey: ["lead_tasks", lead.data?.id],
     enabled: !!lead.data,
-    queryFn: async () => (await supabase.from("lead_tasks").select("*").eq("lead_id", lead.data!.id).order("done").order("due_at")).data ?? [],
+    queryFn: async () => (await db.lead_tasks.where("lead_id").equals(lead.data!.id).toArray()).sort((a, b) => Number(a.done) - Number(b.done) || (a.due_at ?? "9").localeCompare(b.due_at ?? "9")),
   });
   const [note, setNote] = useState({ kind: "note", content: "" });
   const [task, setTask] = useState({ title: "", due: "" });
 
   const update = useMutation({
-    mutationFn: async (patch: Partial<Lead>) => {
-      const { error } = await supabase.from("leads").update(patch).eq("id", lead.data!.id);
-      if (error) throw error;
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["lead", businessId] }); qc.invalidateQueries({ queryKey: ["lead_notes"] }); qc.invalidateQueries({ queryKey: ["leads"] }); toast.success("Lead atualizado"); },
+    mutationFn: (patch: Partial<Lead>) => updateLead(lead.data!.id, patch),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["lead", businessId] }); qc.invalidateQueries({ queryKey: ["lead_notes"] }); qc.invalidateQueries({ queryKey: ["leads"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); toast.success("Lead atualizado"); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const addNote = async () => {
     if (!note.content.trim()) return;
-    const { error } = await supabase.from("lead_notes").insert({ organization_id: orgId, lead_id: lead.data!.id, user_id: user!.id, kind: note.kind, content: note.content.trim() });
-    if (error) return toast.error(error.message);
+    await db.lead_notes.add({ id: uid(), lead_id: lead.data!.id, kind: note.kind, content: note.content.trim().slice(0, 5000), created_at: nowIso() });
     if (["call", "whatsapp", "email", "meeting", "visit"].includes(note.kind) && ["novo", "nao_analisado", "analisado", "oportunidade"].includes(lead.data!.status)) {
-      await supabase.from("leads").update({ status: "primeiro_contato" }).eq("id", lead.data!.id);
+      await updateLead(lead.data!.id, { status: "primeiro_contato" });
       qc.invalidateQueries({ queryKey: ["lead", businessId] });
     }
     setNote({ ...note, content: "" });
@@ -60,18 +48,17 @@ export function CrmPanel({ businessId }: { businessId: string }) {
   };
   const addTask = async () => {
     if (!task.title.trim()) return;
-    const { error } = await supabase.from("lead_tasks").insert({ organization_id: orgId, lead_id: lead.data!.id, user_id: user!.id, title: task.title.trim(), due_at: task.due ? new Date(task.due).toISOString() : null });
-    if (error) return toast.error(error.message);
+    await db.lead_tasks.add({ id: uid(), lead_id: lead.data!.id, title: task.title.trim().slice(0, 300), due_at: task.due ? new Date(task.due).toISOString() : null, done: false, done_at: null, created_at: nowIso() });
     setTask({ title: "", due: "" });
     qc.invalidateQueries({ queryKey: ["lead_tasks", lead.data!.id] });
     toast.success("Tarefa criada");
   };
   const toggleTask = async (t: any) => {
-    await supabase.from("lead_tasks").update({ done: !t.done, done_at: !t.done ? new Date().toISOString() : null }).eq("id", t.id);
+    await db.lead_tasks.update(t.id, { done: !t.done, done_at: !t.done ? nowIso() : null });
     qc.invalidateQueries({ queryKey: ["lead_tasks", lead.data!.id] });
   };
   const removeTask = async (id: string) => {
-    await supabase.from("lead_tasks").delete().eq("id", id);
+    await db.lead_tasks.delete(id);
     qc.invalidateQueries({ queryKey: ["lead_tasks", lead.data!.id] });
   };
 

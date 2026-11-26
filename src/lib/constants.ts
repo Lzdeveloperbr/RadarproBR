@@ -48,7 +48,7 @@ export const leadStatusLabel = (s: string) => LEAD_STATUS.find((x) => x.key === 
 
 export const CHECK_LABELS: Record<string, string> = {
   own_site: "Possui site próprio",
-  site_online: "Site funcionando",
+  site_online: "Site respondendo",
   https: "Utiliza HTTPS",
   mobile_viewport: "Preparado para celular",
   address: "Endereço físico publicado",
@@ -70,8 +70,9 @@ export const CHECK_LABELS: Record<string, string> = {
   shared_domain: "Domínio compartilhado (duplicado)",
   name_match: "Nome confere com a página",
   phone_match: "Telefone confere com a página",
-  phone_places: "Telefone no Google",
-  hours_places: "Horário no Google",
+  phone_places: "Telefone público no cadastro",
+  whatsapp_places: "WhatsApp informado no cadastro",
+  hours_places: "Horário publicado no cadastro",
   whatsapp_text_only: "WhatsApp citado sem link",
 };
 

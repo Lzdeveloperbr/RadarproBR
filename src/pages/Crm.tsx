@@ -6,8 +6,7 @@ import { Users, Download, FileSpreadsheet, Calculator, Star, FileDown } from "lu
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { KanbanSquare } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { leadsWithBusiness } from "../lib/services";
 import { LEAD_STATUS, leadStatusLabel, type LeadStatus } from "../lib/constants";
 import type { Lead } from "../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, PageHeader, PageLoader } from "../components/ui";
@@ -16,18 +15,7 @@ import { exportCSV, exportPDFTable, exportXLSX, type Row } from "../lib/export";
 import { fmtDate, fmtMoney } from "../lib/format";
 
 function useLeads() {
-  const { orgId } = useAuth();
-  return useQuery({
-    queryKey: ["leads", orgId],
-    enabled: !!orgId,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("leads")
-        .select("*, businesses(id, name, city, neighborhood, category, phone, opportunity_level, opportunity_score, digital_status)")
-        .eq("organization_id", orgId!).order("position").order("updated_at", { ascending: false }).limit(5000);
-      if (error) throw error;
-      return data as Lead[];
-    },
-  });
+  return useQuery({ queryKey: ["leads"], queryFn: async () => (await leadsWithBusiness()) as Lead[] });
 }
 
 const leadRows = (list: Lead[]): Row[] => list.map((l) => ({
@@ -155,7 +143,6 @@ function Column({ status, label, hex, leads }: { status: LeadStatus; label: stri
 export function KanbanPage() {
   const q = useLeads();
   const qc = useQueryClient();
-  const { orgId } = useAuth();
   const [term, setTerm] = useState("");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }));
   const leads = (q.data ?? []).filter((l) => !term || `${l.businesses?.name} ${l.businesses?.city}`.toLowerCase().includes(term.toLowerCase()));
@@ -165,9 +152,11 @@ export function KanbanPage() {
     const to = e.over?.id as LeadStatus | undefined;
     const lead = q.data?.find((l) => l.id === id);
     if (!to || !lead || lead.status === to) return;
-    qc.setQueryData(["leads", orgId], (old: Lead[] | undefined) => old?.map((l) => (l.id === id ? { ...l, status: to } : l)));
-    const { error } = await supabase.from("leads").update({ status: to, position: Date.now() / 1e6 }).eq("id", id);
-    if (error) { toast.error("Falha ao mover: " + error.message); qc.invalidateQueries({ queryKey: ["leads"] }); return; }
+    qc.setQueryData(["leads"], (old: Lead[] | undefined) => old?.map((l) => (l.id === id ? { ...l, status: to } : l)));
+    try {
+      const { updateLead } = await import("../lib/db");
+      await updateLead(id, { status: to, position: Date.now() / 1e6 });
+    } catch (err: any) { toast.error("Falha ao mover: " + err.message); qc.invalidateQueries({ queryKey: ["leads"] }); return; }
     toast.success(`${lead.businesses?.name} → ${leadStatusLabel(to)}`);
     qc.invalidateQueries({ queryKey: ["dashboard"] });
   };

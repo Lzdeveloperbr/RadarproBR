@@ -5,8 +5,9 @@ import {
   Target, PhoneCall, FileText, Trophy, Activity, Radar, Bell, CheckCircle2, Clock,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } from "recharts";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db } from "../lib/db";
+import { dashboardStats } from "../lib/services";
+import { useSettings } from "../hooks/useSettings";
 import { Card, CardHeader, PageHeader, StatCard, PageLoader, EmptyState, Button, Badge } from "../components/ui";
 import { fmtMoney, fmtNumber, timeAgo, fmtDateTime } from "../lib/format";
 import { LEAD_STATUS } from "../lib/constants";
@@ -22,48 +23,46 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 export function DashboardPage() {
-  const { orgId, profile } = useAuth();
+  const { settings } = useSettings();
+  const firstName = settings.seller_name?.split(" ")[0];
   const nav = useNavigate();
   const stats = useQuery({
-    queryKey: ["dashboard", orgId],
-    enabled: !!orgId,
-    refetchInterval: 15000,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("dashboard_stats", { p_org: orgId });
-      if (error) throw error;
-      return data as any;
-    },
+    queryKey: ["dashboard"],
+    refetchInterval: 5000,
+    queryFn: dashboardStats,
   });
   const activity = useQuery({
-    queryKey: ["activity", orgId],
-    enabled: !!orgId,
-    refetchInterval: 15000,
-    queryFn: async () => (await supabase.from("activity_logs").select("*").eq("organization_id", orgId!).order("created_at", { ascending: false }).limit(12)).data ?? [],
+    queryKey: ["activity"],
+    refetchInterval: 5000,
+    queryFn: () => db.activity.orderBy("created_at").reverse().limit(12).toArray(),
   });
   const searches = useQuery({
-    queryKey: ["searches", "recent", orgId],
-    enabled: !!orgId,
-    queryFn: async () => (await supabase.from("searches").select("*").eq("organization_id", orgId!).order("created_at", { ascending: false }).limit(6)).data ?? [],
+    queryKey: ["searches", "recent"],
+    queryFn: () => db.searches.orderBy("created_at").reverse().limit(6).toArray(),
   });
   const tasks = useQuery({
-    queryKey: ["tasks", "today", orgId],
-    enabled: !!orgId,
+    queryKey: ["tasks", "today"],
     queryFn: async () => {
       const end = new Date(); end.setHours(23, 59, 59, 999);
-      return (await supabase.from("lead_tasks").select("*, leads(business_id, businesses(name))").eq("organization_id", orgId!).eq("done", false).lte("due_at", end.toISOString()).order("due_at").limit(8)).data ?? [];
+      const tasks = (await db.lead_tasks.filter((t) => !t.done && !!t.due_at && t.due_at <= end.toISOString()).toArray()).sort((a, b) => a.due_at!.localeCompare(b.due_at!)).slice(0, 8);
+      return Promise.all(tasks.map(async (t) => {
+        const lead = await db.leads.get(t.lead_id);
+        const b = lead ? await db.businesses.get(lead.business_id) : undefined;
+        return { ...t, leads: { business_id: lead?.business_id, businesses: { name: b?.name } } };
+      }));
     },
   });
 
   if (stats.isLoading) return <PageLoader label="Carregando indicadores..." />;
   if (stats.error) return <EmptyState title="Não foi possível carregar o dashboard" description={(stats.error as Error).message} />;
-  const s = stats.data ?? {};
+  const s: any = stats.data ?? {};
 
   if (!s.total) {
     return (
       <>
-        <PageHeader title={`Olá, ${profile?.full_name?.split(" ")[0] ?? ""}`} subtitle="Sua central de inteligência comercial" />
+        <PageHeader title={firstName ? `Olá, ${firstName}` : "Bem-vindo ao RADAR LOCAL PRO"} subtitle="Sua central de inteligência comercial" />
         <Card className="p-2"><EmptyState icon={Radar} title="Nenhum estabelecimento pesquisado ainda"
-          description="Escolha uma cidade e categorias para descobrir estabelecimentos reais, verificar seus sites e identificar oportunidades."
+          description="Escolha uma cidade e categorias para descobrir estabelecimentos reais no OpenStreetMap, verificar seus sites e identificar oportunidades. É grátis e seus dados ficam salvos neste navegador."
           action={<Button icon={Radar} onClick={() => nav("/pesquisa")}>Fazer primeira pesquisa</Button>} /></Card>
       </>
     );
@@ -84,7 +83,7 @@ export function DashboardPage() {
 
   return (
     <>
-      <PageHeader title={`Olá, ${profile?.full_name?.split(" ")[0] ?? ""}`} subtitle="Indicadores atualizados em tempo real" icon={Activity}
+      <PageHeader title={firstName ? `Olá, ${firstName}` : "Bem-vindo ao RADAR LOCAL PRO"} subtitle="Indicadores atualizados em tempo real" icon={Activity}
         actions={<><Button variant="secondary" onClick={() => nav("/relatorios")}>Relatórios</Button><Button icon={Radar} onClick={() => nav("/pesquisa")}>Nova pesquisa</Button></>} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">

@@ -1,23 +1,20 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { History, Radar, Eye } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db } from "../lib/db";
 import { Badge, Card, CardHeader, EmptyState, PageHeader, PageLoader } from "../components/ui";
 import { fmtDateTime } from "../lib/format";
 
 export function HistoryPage() {
-  const { orgId, user } = useAuth();
   const q = useQuery({
-    queryKey: ["history", orgId],
-    enabled: !!orgId,
+    queryKey: ["history"],
     queryFn: async () => {
-      const [s, v] = await Promise.all([
-        supabase.from("searches").select("*").eq("organization_id", orgId!).order("created_at", { ascending: false }).limit(200),
-        supabase.from("business_views").select("business_id, viewed_at, businesses(name, city, category)").eq("user_id", user!.id).order("viewed_at", { ascending: false }).limit(100),
-      ]);
+      const searches = await db.searches.orderBy("created_at").reverse().limit(200).toArray();
+      const views = await db.views.orderBy("viewed_at").reverse().limit(150).toArray();
+      const biz = await db.businesses.bulkGet(views.map((v) => v.business_id));
+      const v = views.map((x, i) => ({ ...x, businesses: biz[i] })).filter((x) => x.businesses);
       const seen = new Set<string>();
-      return { searches: s.data ?? [], views: (v.data ?? []).filter((x: any) => (seen.has(x.business_id) ? false : (seen.add(x.business_id), true))).slice(0, 40) };
+      return { searches, views: v.filter((x: any) => (seen.has(x.business_id) ? false : (seen.add(x.business_id), true))).slice(0, 40) };
     },
   });
   if (q.isLoading || !q.data) return <PageLoader />;

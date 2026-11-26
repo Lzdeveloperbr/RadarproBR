@@ -1,4 +1,5 @@
-import { supabase } from "./supabase";
+import { db } from "./db";
+import { haversineKm, stripAccents } from "./engine/normalize";
 import type { Business } from "./types";
 
 export interface BusinessFilters {
@@ -27,13 +28,10 @@ export interface BusinessFilters {
 export const FILTER_TOGGLES: { key: keyof BusinessFilters; label: string }[] = [
   { key: "onlyNoSite", label: "Sem site identificado" },
   { key: "onlyWithSite", label: "Com site" },
-  { key: "sitesOffline", label: "Sites fora do ar" },
-  { key: "noHttps", label: "Sites sem HTTPS" },
+  { key: "noHttps", label: "Sites sem resposta em HTTPS" },
   { key: "noLocation", label: "Sites sem localização" },
   { key: "noWhatsapp", label: "Sem WhatsApp identificado" },
   { key: "noInstagram", label: "Sem Instagram identificado" },
-  { key: "ratingAbove4", label: "Avaliação acima de 4★" },
-  { key: "reviewsOver50", label: "Mais de 50 avaliações" },
   { key: "notAnalyzed", label: "Ainda não analisados" },
 ];
 
@@ -41,40 +39,42 @@ export function countActive(f: BusinessFilters) {
   return Object.entries(f).filter(([k, v]) => k !== "sort" && (Array.isArray(v) ? v.length : !!v)).length;
 }
 
-export async function fetchBusinesses(orgId: string, f: BusinessFilters, limit = 1000): Promise<Business[]> {
-  const select = f.searchId ? "*, search_results!inner(search_id)" : "*";
-  let q: any = f.radius
-    ? supabase.rpc("businesses_within", { p_org: orgId, p_lat: f.radius.lat, p_lng: f.radius.lng, p_km: f.radius.km }).select(select)
-    : supabase.from("businesses").select(select).eq("organization_id", orgId);
+const norm = (v: string | null | undefined) => stripAccents((v ?? "").toLowerCase());
 
-  if (f.searchId) q = q.eq("search_results.search_id", f.searchId);
-  if (f.ids) q = q.in("id", f.ids.length ? f.ids : ["00000000-0000-0000-0000-000000000000"]);
-  if (f.q) {
-    const term = f.q.replace(/[%,()]/g, " ").trim();
-    q = q.or(`name.ilike.%${term}%,city.ilike.%${term}%,category.ilike.%${term}%,neighborhood.ilike.%${term}%,formatted_address.ilike.%${term}%`);
-  }
-  if (f.city) q = q.ilike("city", `%${f.city}%`);
-  if (f.neighborhood) q = q.ilike("neighborhood", `%${f.neighborhood}%`);
-  if (f.category) q = q.eq("category", f.category);
-  if (f.onlyNoSite) q = q.eq("digital_status", "no_site");
-  if (f.onlyWithSite) q = q.eq("has_own_site", true);
-  if (f.sitesOffline) q = q.eq("has_own_site", true).eq("site_online", false);
-  if (f.noHttps) q = q.eq("has_own_site", true).eq("site_https", false);
-  if (f.noLocation) q = q.eq("has_own_site", true).eq("site_has_location", false);
-  if (f.noWhatsapp) q = q.or("has_whatsapp.is.null,has_whatsapp.eq.false");
-  if (f.noInstagram) q = q.or("has_instagram.is.null,has_instagram.eq.false");
-  if (f.ratingAbove4) q = q.gt("rating", 4);
-  if (f.reviewsOver50) q = q.gt("user_rating_count", 50);
-  if (f.levels?.length) q = q.in("opportunity_level", f.levels);
-  if (f.statuses?.length) q = q.in("digital_status", f.statuses);
-  if (f.notAnalyzed) q = q.is("analyzed_at", null);
+export async function fetchBusinesses(f: BusinessFilters, limit = 1000): Promise<Business[]> {
+  let list: Business[];
+  if (f.ids) list = (await db.businesses.bulkGet(f.ids)).filter((b): b is Business => !!b);
+  else if (f.searchId) {
+    const ids = (await db.search_results.where("search_id").equals(f.searchId).toArray()).map((r) => r.business_id);
+    list = (await db.businesses.bulkGet(ids)).filter((b): b is Business => !!b);
+  } else list = await db.businesses.toArray();
 
+  const q = norm(f.q);
+  list = list.filter((b) => {
+    if (q && ![b.name, b.city, b.category, b.neighborhood, b.formatted_address].some((v) => norm(v).includes(q))) return false;
+    if (f.city && !norm(b.city).includes(norm(f.city))) return false;
+    if (f.neighborhood && !norm(b.neighborhood).includes(norm(f.neighborhood))) return false;
+    if (f.category && b.category !== f.category) return false;
+    if (f.onlyNoSite && b.digital_status !== "no_site") return false;
+    if (f.onlyWithSite && b.has_own_site !== true) return false;
+    if (f.sitesOffline && !(b.has_own_site && b.site_https === false)) return false;
+    if (f.noHttps && !(b.has_own_site && b.site_https === false)) return false;
+    if (f.noLocation && !(b.has_own_site && b.site_has_location === false)) return false;
+    if (f.noWhatsapp && b.has_whatsapp === true) return false;
+    if (f.noInstagram && b.has_instagram === true) return false;
+    if (f.ratingAbove4 && !((b.rating ?? 0) > 4)) return false;
+    if (f.reviewsOver50 && !((b.user_rating_count ?? 0) > 50)) return false;
+    if (f.levels?.length && !(b.opportunity_level && f.levels.includes(b.opportunity_level))) return false;
+    if (f.statuses?.length && !f.statuses.includes(b.digital_status)) return false;
+    if (f.notAnalyzed && b.analyzed_at) return false;
+    if (f.radius && (b.lat == null || b.lng == null || haversineKm(f.radius.lat, f.radius.lng, b.lat, b.lng) > f.radius.km)) return false;
+    return true;
+  });
   const sort = f.sort ?? "score";
-  if (sort === "score") q = q.order("opportunity_score", { ascending: false, nullsFirst: false }).order("name");
-  if (sort === "name") q = q.order("name");
-  if (sort === "rating") q = q.order("user_rating_count", { ascending: false, nullsFirst: false });
-  if (sort === "recent") q = q.order("created_at", { ascending: false });
-  const { data, error } = await q.limit(limit);
-  if (error) throw error;
-  return (data ?? []) as Business[];
+  list.sort((a, b) =>
+    sort === "name" ? a.name.localeCompare(b.name, "pt-BR")
+    : sort === "rating" ? (b.user_rating_count ?? -1) - (a.user_rating_count ?? -1)
+    : sort === "recent" ? b.created_at.localeCompare(a.created_at)
+    : (b.opportunity_score ?? -1) - (a.opportunity_score ?? -1) || a.name.localeCompare(b.name, "pt-BR"));
+  return list.slice(0, limit);
 }

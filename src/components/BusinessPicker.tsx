@@ -1,17 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { fetchBusinesses } from "../lib/filters";
 
 export function BusinessPicker({ onPick, placeholder = "Buscar estabelecimento cadastrado..." }: { onPick: (id: string) => void; placeholder?: string }) {
-  const { orgId } = useAuth();
   const [term, setTerm] = useState("");
   const q = useQuery({
-    queryKey: ["picker", orgId, term],
-    enabled: !!orgId && term.trim().length >= 2,
-    queryFn: async () => (await supabase.from("businesses").select("id, name, city, category, opportunity_score").eq("organization_id", orgId!)
-      .ilike("name", `%${term.trim().replace(/[%,]/g, "")}%`).order("opportunity_score", { ascending: false, nullsFirst: false }).limit(8)).data ?? [],
+    queryKey: ["picker", term],
+    enabled: term.trim().length >= 2,
+    queryFn: () => fetchBusinesses({ q: term.trim() }, 8),
   });
   return (
     <div className="relative">

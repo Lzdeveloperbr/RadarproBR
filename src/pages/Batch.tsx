@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Layers, Play, Pause, XCircle, RotateCcw, Radar, CheckCircle2, AlertCircle, Loader2, Clock, ListChecks } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db } from "../lib/db";
+import { useSettings } from "../hooks/useSettings";
 import { useBatchRunner, type ItemPayload } from "../hooks/useBatchRunner";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, PageHeader, PageLoader, ProgressBar, Toggle } from "../components/ui";
 import { CategoryPicker } from "../components/CategoryPicker";
 import { UFS } from "../lib/constants";
-import { errorMessage } from "../lib/api";
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 import { fmtDateTime } from "../lib/format";
 
 const JOB_STATUS: Record<string, [string, string]> = {
@@ -30,11 +30,11 @@ export function JobControls({ job }: { job: any }) {
 }
 
 export function BatchPage() {
-  const { orgId, settings } = useAuth();
+  const { settings } = useSettings();
   const runner = useBatchRunner();
   const nav = useNavigate();
   const [cities, setCities] = useState("");
-  const [state, setState] = useState(settings?.default_state ?? "");
+  const [state, setState] = useState(settings.default_state ?? "");
   const [cats, setCats] = useState<string[]>([]);
   const [radius, setRadius] = useState(15);
   const [max, setMax] = useState(60);
@@ -43,10 +43,9 @@ export function BatchPage() {
   const [creating, setCreating] = useState(false);
 
   const jobs = useQuery({
-    queryKey: ["batch", "list", orgId],
-    enabled: !!orgId,
-    refetchInterval: 3000,
-    queryFn: async () => (await supabase.from("batch_jobs").select("*").eq("organization_id", orgId!).order("created_at", { ascending: false }).limit(50)).data ?? [],
+    queryKey: ["batch", "list"],
+    refetchInterval: 2000,
+    queryFn: () => db.batch_jobs.orderBy("created_at").reverse().limit(50).toArray(),
   });
   const cityList = cities.split(/[\n;]+/).map((c) => c.trim()).filter(Boolean);
   const total = cityList.length * cats.length;
@@ -93,10 +92,10 @@ export function BatchPage() {
         </Card>
         <Card className="p-5 text-xs text-ink-300 space-y-2">
           <div className="heading text-sm font-semibold text-white">Como a fila funciona</div>
-          <p>• Os itens ficam salvos no banco: você pode fechar a página e continuar depois.</p>
-          <p>• Até 3 itens são processados em paralelo; limites por minuto e por dia são aplicados pelo backend.</p>
+          <p>• Os itens ficam salvos no navegador: você pode fechar a página e continuar depois (a fila só avança com o app aberto).</p>
+          <p>• Até 2 itens em paralelo, com pausas para respeitar os servidores públicos do OpenStreetMap.</p>
           <p>• Falhas temporárias são repetidas automaticamente (até 3 tentativas, com espera crescente).</p>
-          <p>• Se uma integração não estiver configurada, a fila é pausada e você é avisado.</p>
+          <p>• Se o OpenStreetMap estiver ocupado, a fila espera e tenta de novo automaticamente.</p>
         </Card>
       </div>
       <Card className="mt-4">
@@ -127,12 +126,9 @@ export function BatchDetailPage() {
     queryKey: ["batch", "job", id],
     refetchInterval: (q) => (["running", "pending"].includes((q.state.data as any)?.job?.status) ? 2000 : false),
     queryFn: async () => {
-      const [j, items] = await Promise.all([
-        supabase.from("batch_jobs").select("*").eq("id", id!).single(),
-        supabase.from("batch_job_items").select("*").eq("batch_job_id", id!).order("seq").limit(2000),
-      ]);
-      if (j.error) throw j.error;
-      return { job: j.data, items: items.data ?? [] };
+      const job = await db.batch_jobs.get(id!);
+      if (!job) throw new Error("Fila não encontrada");
+      return { job, items: (await db.batch_items.where("batch_job_id").equals(id!).toArray()).sort((a, b) => a.seq - b.seq) };
     },
   });
   if (job.isLoading) return <PageLoader />;
@@ -190,7 +186,7 @@ export function BatchDetailPage() {
             {audits.map((i: any) => (
               <Link key={i.id} to={`/estabelecimento/${i.payload.business_id}`} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/[0.03]">
                 {icon(i.status)}
-                <span className="text-xs text-ink-300 flex-1 truncate">{i.error ?? (i.result ? `Pontuação ${i.result.score} · ${i.result.level}` : "Aguardando")}</span>
+                <span className="text-xs text-ink-300 flex-1 truncate">{i.error ?? (i.result ? `${i.result.name ?? ""} · pontuação ${i.result.score} · ${i.result.level}` : "Aguardando")}</span>
               </Link>
             ))}
           </div>

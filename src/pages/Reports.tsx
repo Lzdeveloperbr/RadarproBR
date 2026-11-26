@@ -4,8 +4,7 @@ import { BarChart3, FileSpreadsheet, FileDown, Download, Building2, GlobeLock, T
 import { useQuery } from "@tanstack/react-query";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db } from "../lib/db";
 import { fetchBusinesses } from "../lib/filters";
 import { businessRows, exportCSV, exportPDFTable, exportXLSX, pdfHeader, type Row } from "../lib/export";
 import { Button, Card, CardHeader, PageHeader } from "../components/ui";
@@ -30,9 +29,8 @@ function group(rows: Row[], key: string): Row[] {
 }
 
 export function ReportsPage() {
-  const { orgId } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
-  const searches = useQuery({ queryKey: ["searches", "reports", orgId], enabled: !!orgId, queryFn: async () => (await supabase.from("searches").select("id, city, categories, created_at, total_found").eq("organization_id", orgId!).eq("status", "completed").order("created_at", { ascending: false }).limit(50)).data ?? [] });
+  const searches = useQuery({ queryKey: ["searches", "reports"], queryFn: async () => (await db.searches.orderBy("created_at").reverse().filter((s) => s.status === "completed").limit(50).toArray()) });
   const [searchId, setSearchId] = useState("");
 
   const out = (rows: Row[], fmt: Fmt, title: string, file: string, cols = COLS) => {
@@ -46,11 +44,12 @@ export function ReportsPage() {
     setBusy(key + fmt);
     try {
       const date = new Date().toISOString().slice(0, 10);
-      if (key === "all") out(businessRows(await fetchBusinesses(orgId!, {}, 10000)), fmt, "Empresas encontradas", `empresas-${date}`);
-      if (key === "nosite") out(businessRows(await fetchBusinesses(orgId!, { onlyNoSite: true }, 10000)), fmt, "Empresas sem site identificado", `sem-site-${date}`);
-      if (key === "opps") out(businessRows(await fetchBusinesses(orgId!, { levels: ["alta", "media"] }, 10000)), fmt, "Oportunidades comerciais", `oportunidades-${date}`);
+      if (key === "all") out(businessRows(await fetchBusinesses({}, 10000)), fmt, "Empresas encontradas", `empresas-${date}`);
+      if (key === "nosite") out(businessRows(await fetchBusinesses({ onlyNoSite: true }, 10000)), fmt, "Empresas sem site identificado", `sem-site-${date}`);
+      if (key === "opps") out(businessRows(await fetchBusinesses({ levels: ["alta", "media"] }, 10000)), fmt, "Oportunidades comerciais", `oportunidades-${date}`);
       if (key === "city" || key === "category") {
-        const { data } = await supabase.from("leads").select("status, potential_value, businesses(city, category, digital_status, opportunity_level)").eq("organization_id", orgId!).limit(10000);
+        const { leadsWithBusiness } = await import("../lib/services");
+        const data = await leadsWithBusiness();
         const field = key === "city" ? "Cidade" : "Categoria";
         const m = new Map<string, Row>();
         for (const l of data ?? []) {
@@ -69,7 +68,7 @@ export function ReportsPage() {
       }
       if (key === "search") {
         if (!searchId) throw new Error("Selecione a pesquisa");
-        const rows = businessRows(await fetchBusinesses(orgId!, { searchId }, 10000));
+        const rows = businessRows(await fetchBusinesses({ searchId }, 10000));
         if (fmt === "xlsx") {
           exportXLSX([{ name: "Estabelecimentos", rows }, { name: "Por categoria", rows: group(rows, "Categoria") }, { name: "Por bairro", rows: group(rows, "Bairro") }], `pesquisa-${date}`);
           toast.success("Relatório gerado");
@@ -81,18 +80,15 @@ export function ReportsPage() {
   const individual = async (id: string) => {
     setBusy("ind");
     try {
-      const [b, a, o, c] = await Promise.all([
-        supabase.from("businesses").select("*").eq("id", id).single(),
-        supabase.from("digital_audits").select("*").eq("business_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-        supabase.from("opportunities").select("*").eq("business_id", id).maybeSingle(),
-        supabase.from("leads").select("status, potential_value").eq("business_id", id).maybeSingle(),
-      ]);
-      const B = b.data!;
+      const B = (await db.businesses.get(id))!;
+      const a = { data: (await db.audits.where("business_id").equals(id).sortBy("created_at")).pop() ?? null };
+      const o = { data: (await db.opportunities.get(id)) ?? null };
+      const c = { data: (await db.leads.where("business_id").equals(id).first()) ?? null };
       const doc = new jsPDF({ unit: "pt", format: "a4" });
       pdfHeader(doc, `Relatório individual — ${B.name}`, `${B.category ?? ""} · ${B.formatted_address ?? ""} · ${fmtDateTime(new Date().toISOString())}`);
       autoTable(doc, {
         startY: 130, theme: "plain", styles: { fontSize: 9 }, margin: { left: 32, right: 32 },
-        body: [["Telefone", B.phone ?? "Não identificado"], ["Site", B.primary_website ?? "Não identificado"], ["Avaliação", B.rating != null ? `${B.rating} (${B.user_rating_count})` : "—"],
+        body: [["Telefone", B.phone ?? "Não identificado"], ["Site", B.primary_website ?? "Não identificado"], ["Endereço", B.formatted_address ?? "—"],
           ["Presença digital", DIGITAL_STATUS[B.digital_status as keyof typeof DIGITAL_STATUS]?.label], ["Oportunidade", o.data ? `${o.data.level} — ${o.data.score}/100` : "Não classificado"],
           ["Status no CRM", c.data ? leadStatusLabel(c.data.status) : "—"], ["Coordenadas", B.lat != null ? `${B.lat}, ${B.lng}` : "—"]],
         columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },

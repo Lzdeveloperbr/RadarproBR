@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Wand2, Copy, Sparkles, Save, Smartphone, Globe, ExternalLink } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { callFunction, errorMessage } from "../lib/api";
-import { useAuth } from "../hooks/useAuth";
+import { Wand2, Copy, Save, Smartphone, Globe, ExternalLink } from "lucide-react";
+import { db, uid, nowIso } from "../lib/db";
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 import { buildLovablePrompt } from "../lib/sitePrompt";
 import type { Business } from "../lib/types";
 import { Button, Card, CardHeader, EmptyState, PageHeader, Tabs } from "../components/ui";
@@ -13,24 +12,18 @@ import { BusinessPicker } from "../components/BusinessPicker";
 import { copyText } from "../lib/format";
 
 export function SiteGeneratorPage() {
-  const { orgId, user } = useAuth();
   const [sp, setSp] = useSearchParams();
   const businessId = sp.get("business");
   const [kind, setKind] = useState<"site" | "app">(sp.get("kind") === "app" ? "app" : "site");
   const [text, setText] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
 
   const data = useQuery({
     queryKey: ["generator", businessId],
     enabled: !!businessId,
     queryFn: async () => {
-      const [b, c, o] = await Promise.all([
-        supabase.from("businesses").select("*").eq("id", businessId!).single(),
-        supabase.from("business_contacts").select("type, value, url").eq("business_id", businessId!),
-        supabase.from("opportunities").select("reasons, suggested_products").eq("business_id", businessId!).maybeSingle(),
-      ]);
-      if (b.error) throw b.error;
-      return { b: b.data as Business, contacts: c.data ?? [], opp: o.data };
+      const b = await db.businesses.get(businessId!);
+      if (!b) throw new Error("Estabelecimento não encontrado");
+      return { b: b as Business, contacts: await db.contacts.where("business_id").equals(businessId!).toArray(), opp: (await db.opportunities.get(businessId!)) ?? null };
     },
   });
 
@@ -50,21 +43,8 @@ export function SiteGeneratorPage() {
   }, [data.data, kind]);
 
   const save = async () => {
-    const { error } = await supabase.from("generated_prompts").insert({ organization_id: orgId, business_id: businessId, user_id: user!.id, kind: kind === "app" ? "app" : "lovable_site", title: `${kind === "app" ? "Prompt de aplicativo" : "Prompt Lovable"} — ${data.data?.b.name}`, content: text });
-    if (error) return toast.error(error.message);
+    await db.prompts.add({ id: uid(), business_id: businessId, kind: kind === "app" ? "app" : "lovable_site", title: `${kind === "app" ? "Prompt de aplicativo" : "Prompt Lovable"} — ${data.data?.b.name}`, content: text, created_at: nowIso() });
     toast.success("Prompt salvo no histórico do estabelecimento");
-  };
-  const enhance = async () => {
-    setAiLoading(true);
-    try {
-      const r = await callFunction<{ text: string }>("ai-assistant", { business_id: businessId, task: kind === "app" ? "app_prompt" : "site_prompt" });
-      setText(r.text);
-      toast.success("Prompt gerado pela IA (salvo no histórico)");
-    } catch (e) {
-      toast.error(errorMessage(e), { duration: 8000 });
-    } finally {
-      setAiLoading(false);
-    }
   };
   const placeholders = (text.match(/\[A PREENCHER[^\]]*\]/g) ?? []).length;
 
@@ -84,7 +64,6 @@ export function SiteGeneratorPage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button icon={Copy} onClick={async () => { await copyText(text); toast.success("Prompt copiado!"); }}>COPIAR PROMPT</Button>
                 <Button variant="secondary" icon={Save} onClick={save}>Salvar</Button>
-                <Button variant="outline" icon={Sparkles} loading={aiLoading} onClick={enhance}>Gerar versão com IA</Button>
                 <a href="https://lovable.dev" target="_blank" rel="noreferrer"><Button variant="ghost" icon={ExternalLink}>Abrir Lovable</Button></a>
               </div>
             </div>

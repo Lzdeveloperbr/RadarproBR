@@ -1,11 +1,17 @@
 // Fonte GRATUITA de estabelecimentos: OpenStreetMap (Overpass API) + geocodificação Nominatim.
-// Sem chave e sem cartão. Respeita as políticas de uso: User-Agent identificado, 1 req/s no Nominatim,
-// consultas Overpass com timeout e limite de resultados.
-import { env, HttpError } from "./http.ts";
+// Chamadas feitas direto do navegador (as duas APIs liberam CORS). Sem chave e sem cartão.
+// Políticas de uso respeitadas: no máximo 1 req/s no Nominatim, consultas Overpass com timeout e limite.
 
-export const OSM_USER_AGENT = env("OSM_USER_AGENT") ?? "RadarLocalPro/1.0 (+https://github.com/Lzdeveloperbr/RadarproBR)";
-const NOMINATIM = env("NOMINATIM_URL") ?? "https://nominatim.openstreetmap.org";
-const OVERPASS = (env("OVERPASS_URLS") ?? "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter").split(",");
+export class SourceError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const NOMINATIM = "https://nominatim.openstreetmap.org";
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 
 // Mapeamento das categorias do RADAR para tags do OpenStreetMap (filtros Overpass QL).
 export const OSM_CATEGORY_FILTERS: Record<string, string[]> = {
@@ -171,12 +177,12 @@ export async function nominatimGeocode(query: string): Promise<{ lat: number; ln
   url.searchParams.set("accept-language", "pt-BR");
   let res: Response;
   try {
-    res = await fetch(url, { headers: { "User-Agent": OSM_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+    res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
   } catch (e) {
-    throw new HttpError(503, `Não foi possível conectar ao OpenStreetMap (Nominatim): ${(e as Error).name === "TimeoutError" ? "tempo limite excedido" : (e as Error).message}. Tente novamente em instantes.`, "osm_unavailable");
+    throw new SourceError(503, `Não foi possível conectar ao OpenStreetMap (Nominatim): ${(e as Error).name === "TimeoutError" ? "tempo limite excedido" : (e as Error).message}. Tente novamente em instantes.`);
   }
-  if (res.status === 429) throw new HttpError(429, "Nominatim (OpenStreetMap) limitou as requisições. Aguarde um minuto e tente novamente.", "osm_rate_limit");
-  if (!res.ok) throw new HttpError(502, `Nominatim respondeu HTTP ${res.status}`, "osm_error");
+  if (res.status === 429) throw new SourceError(429, "Nominatim (OpenStreetMap) limitou as requisições. Aguarde um minuto e tente novamente.");
+  if (!res.ok) throw new SourceError(502, `Nominatim respondeu HTTP ${res.status}`);
   const data = await res.json();
   const r = data?.[0];
   if (!r) return null;
@@ -204,7 +210,7 @@ export async function overpassSearch(query: string): Promise<OsmElement[]> {
     try {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "User-Agent": OSM_USER_AGENT, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(query),
         signal: AbortSignal.timeout(50_000),
       });
@@ -216,5 +222,5 @@ export async function overpassSearch(query: string): Promise<OsmElement[]> {
       lastErr = (e as Error).name === "TimeoutError" ? "tempo limite excedido" : String((e as Error).message);
     }
   }
-  throw new HttpError(503, `Servidores Overpass (OpenStreetMap) indisponíveis no momento: ${lastErr}. Tente novamente em alguns minutos.`, "osm_unavailable");
+  throw new SourceError(503, `Servidores Overpass (OpenStreetMap) indisponíveis no momento: ${lastErr}. Tente novamente em alguns minutos.`);
 }

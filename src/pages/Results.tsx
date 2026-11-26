@@ -3,16 +3,15 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ListChecks, ScanSearch, Download, FileSpreadsheet, FileDown, GitCompare, Map as MapIcon, List, Star } from "lucide-react";
-import { useAuth } from "../hooks/useAuth";
 import { useBatchRunner } from "../hooks/useBatchRunner";
 import { fetchBusinesses, type BusinessFilters } from "../lib/filters";
-import { supabase } from "../lib/supabase";
+import { db, ensureLead } from "../lib/db";
 import { Button, Card, EmptyState, PageHeader, PageLoader, Tabs } from "../components/ui";
 import { FilterPanel } from "../components/FilterPanel";
 import { BusinessList } from "../components/BusinessList";
 import { MapView, MapLegend } from "../components/MapView";
 import { businessRows, exportCSV, exportPDFTable, exportXLSX } from "../lib/export";
-import { errorMessage } from "../lib/api";
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 import { fmtDateTime } from "../lib/format";
 
 function initialFilters(sp: URLSearchParams): BusinessFilters {
@@ -29,7 +28,6 @@ function initialFilters(sp: URLSearchParams): BusinessFilters {
 }
 
 export function ResultsPage() {
-  const { orgId } = useAuth();
   const runner = useBatchRunner();
   const nav = useNavigate();
   const [sp] = useSearchParams();
@@ -40,12 +38,11 @@ export function ResultsPage() {
   const search = useQuery({
     queryKey: ["search", filters.searchId],
     enabled: !!filters.searchId,
-    queryFn: async () => (await supabase.from("searches").select("*").eq("id", filters.searchId!).single()).data,
+    queryFn: async () => (await db.searches.get(filters.searchId!)) ?? null,
   });
   const q = useQuery({
-    queryKey: ["businesses", orgId, filters],
-    enabled: !!orgId,
-    queryFn: () => fetchBusinesses(orgId!, filters),
+    queryKey: ["businesses", filters],
+    queryFn: () => fetchBusinesses(filters),
   });
   const items = q.data ?? [];
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -62,8 +59,10 @@ export function ResultsPage() {
     } catch (e) { toast.error(errorMessage(e)); }
   };
   const prioritize = async () => {
-    const { error } = await supabase.from("leads").upsert(target.map((b) => ({ organization_id: orgId, business_id: b.id, is_priority: true })), { onConflict: "organization_id,business_id" });
-    if (error) return toast.error(error.message);
+    for (const b of target) {
+      const lead = await ensureLead(b.id);
+      await db.leads.update(lead.id, { is_priority: true });
+    }
     toast.success(`${target.length} estabelecimento(s) marcados como prioritários no CRM`);
   };
   const name = `radar-estabelecimentos-${new Date().toISOString().slice(0, 10)}`;

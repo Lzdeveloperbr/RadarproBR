@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOverpassQuery, describeOpeningHours, filtersFor, formatAddress, parseOsmElement, OSM_CATEGORY_FILTERS } from "../supabase/functions/_shared/osm.ts";
+import { buildOverpassQuery, describeOpeningHours, filtersFor, formatAddress, parseOsmElement, OSM_CATEGORY_FILTERS } from "../src/lib/engine/osm";
 
 const CATEGORIES = ["Barbearias", "Salões de beleza", "Restaurantes", "Pizzarias", "Lanchonetes", "Hamburguerias", "Padarias", "Açougues", "Mercados", "Supermercados",
   "Oficinas mecânicas", "Autoelétricas", "Lava-rápidos", "Borracharias", "Lojas de roupas", "Lojas de calçados", "Lojas de materiais de construção", "Clínicas médicas",

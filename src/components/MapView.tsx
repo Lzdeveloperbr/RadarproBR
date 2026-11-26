@@ -1,17 +1,13 @@
-// Mapa interativo: Google Maps (quando VITE_GOOGLE_MAPS_BROWSER_KEY está definida) ou Leaflet + OpenStreetMap.
+// Mapa interativo gratuito: Leaflet + OpenStreetMap/CARTO.
 // Marcadores coloridos por presença digital e agrupamento de estabelecimentos próximos.
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
-import { APIProvider, Map as GMap, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
-import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import type { Business } from "../lib/types";
 import { DIGITAL_STATUS } from "../lib/constants";
 
-const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY as string | undefined;
-const MAP_ID = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined) ?? "DEMO_MAP_ID";
 
 export interface MapProps {
   businesses: Business[];
@@ -91,58 +87,8 @@ function LeafletMap({ businesses, onSelect, selectedId, className, circle, onMap
   return <div ref={ref} className={className ?? "h-[520px] w-full rounded-2xl overflow-hidden"} />;
 }
 
-function GoogleMarkers({ businesses, onSelect, selectedId, circle }: MapProps) {
-  const map = useMap();
-  const markerLib = useMapsLibrary("marker");
-  const clusterer = useRef<MarkerClusterer | null>(null);
-  const circleRef = useRef<google.maps.Circle | null>(null);
-
-  useEffect(() => {
-    if (!map || !markerLib) return;
-    clusterer.current?.clearMarkers();
-    const pts = located(businesses);
-    const markers = pts.map((b) => {
-      const sel = b.id === selectedId;
-      const el = document.createElement("div");
-      el.style.cssText = `width:${sel ? 24 : 16}px;height:${sel ? 24 : 16}px;border-radius:9999px;background:${colorOf(b)};border:2px solid #08090c;box-shadow:0 0 0 ${sel ? 3 : 1}px ${colorOf(b)}88`;
-      const m = new markerLib.AdvancedMarkerElement({ position: { lat: b.lat!, lng: b.lng! }, content: el, title: b.name });
-      m.addListener("click", () => onSelect?.(b));
-      return m;
-    });
-    clusterer.current = clusterer.current ?? new MarkerClusterer({ map });
-    clusterer.current.addMarkers(markers);
-    if (pts.length && !selectedId) {
-      const bounds = new google.maps.LatLngBounds();
-      pts.forEach((b) => bounds.extend({ lat: b.lat!, lng: b.lng! }));
-      map.fitBounds(bounds, 40);
-    }
-  }, [map, markerLib, businesses, selectedId, onSelect]);
-
-  useEffect(() => {
-    if (!map) return;
-    circleRef.current?.setMap(null);
-    if (circle) circleRef.current = new google.maps.Circle({ map, center: { lat: circle.lat, lng: circle.lng }, radius: circle.km * 1000, strokeColor: "#c6f432", strokeWeight: 1, fillOpacity: 0.04 });
-  }, [map, circle]);
-
-  useEffect(() => {
-    const b = businesses.find((x) => x.id === selectedId);
-    if (b?.lat != null && map) { map.panTo({ lat: b.lat, lng: b.lng! }); if ((map.getZoom() ?? 0) < 15) map.setZoom(16); }
-  }, [selectedId, businesses, map]);
-  return null;
-}
-
 export function MapView(props: MapProps) {
-  if (!GOOGLE_KEY) return <LeafletMap {...props} />;
-  return (
-    <div className={props.className ?? "h-[520px] w-full rounded-2xl overflow-hidden"}>
-      <APIProvider apiKey={GOOGLE_KEY} language="pt-BR" region="BR">
-        <GMap mapId={MAP_ID} defaultCenter={{ lat: -15.78, lng: -47.93 }} defaultZoom={4} colorScheme="DARK" gestureHandling="greedy"
-          onClick={(e) => e.detail.latLng && props.onMapClick?.(e.detail.latLng.lat, e.detail.latLng.lng)} style={{ width: "100%", height: "100%" }}>
-          <GoogleMarkers {...props} />
-        </GMap>
-      </APIProvider>
-    </div>
-  );
+  return <LeafletMap {...props} />;
 }
 
 export function MapLegend() {

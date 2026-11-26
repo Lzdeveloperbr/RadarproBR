@@ -5,21 +5,18 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CATEGORIES } from "../lib/constants";
 import { FILTER_TOGGLES, countActive, type BusinessFilters } from "../lib/filters";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db, uid, nowIso } from "../lib/db";
 import { Button } from "./ui";
 
 export function FilterPanel({ value, onChange, compact }: { value: BusinessFilters; onChange: (f: BusinessFilters) => void; compact?: boolean }) {
-  const { user, orgId } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(!compact);
   const [radius, setRadius] = useState({ lat: value.radius?.lat?.toString() ?? "", lng: value.radius?.lng?.toString() ?? "", km: value.radius?.km?.toString() ?? "" });
   useEffect(() => setRadius({ lat: value.radius?.lat?.toString() ?? "", lng: value.radius?.lng?.toString() ?? "", km: value.radius?.km?.toString() ?? "" }), [value.radius]);
 
   const saved = useQuery({
-    queryKey: ["saved_filters", user?.id],
-    enabled: !!user,
-    queryFn: async () => (await supabase.from("saved_filters").select("*").eq("user_id", user!.id).order("created_at", { ascending: false })).data ?? [],
+    queryKey: ["saved_filters"],
+    queryFn: async () => (await db.saved_filters.toArray()).sort((a, b) => b.created_at.localeCompare(a.created_at)),
   });
 
   const set = (patch: Partial<BusinessFilters>) => onChange({ ...value, ...patch });
@@ -31,13 +28,12 @@ export function FilterPanel({ value, onChange, compact }: { value: BusinessFilte
   const saveCurrent = async () => {
     const name = prompt("Nome do filtro favorito:");
     if (!name?.trim()) return;
-    const { error } = await supabase.from("saved_filters").insert({ user_id: user!.id, organization_id: orgId!, name: name.trim().slice(0, 80), filters: value });
-    if (error) return toast.error("Não foi possível salvar: " + error.message);
+    await db.saved_filters.add({ id: uid(), name: name.trim().slice(0, 80), filters: value, created_at: nowIso() });
     toast.success("Filtro salvo");
     qc.invalidateQueries({ queryKey: ["saved_filters"] });
   };
   const removeSaved = async (id: string) => {
-    await supabase.from("saved_filters").delete().eq("id", id);
+    await db.saved_filters.delete(id);
     qc.invalidateQueries({ queryKey: ["saved_filters"] });
   };
   const applyRadius = () => {

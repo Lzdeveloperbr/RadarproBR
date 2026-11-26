@@ -3,10 +3,10 @@ import { useEffect, useState } from "react";
 import { clsx } from "clsx";
 import {
   LayoutDashboard, Radar, Map, ListChecks, Users, KanbanSquare, FileText, Wand2, History, Star, BarChart3,
-  Plug, Settings, UserCircle, ShieldCheck, LogOut, Menu, X, Layers, ScanSearch, CalendarClock, GitCompare, Search,
+  Plug, Settings, UserCircle, ShieldCheck, Menu, X, Layers, ScanSearch, CalendarClock, GitCompare, Search,
 } from "lucide-react";
 import { Logo } from "./Logo";
-import { useAuth } from "../../hooks/useAuth";
+import { useSettings } from "../../hooks/useSettings";
 
 const NAV = [
   { group: "Prospecção", items: [
@@ -33,8 +33,7 @@ const NAV = [
   { group: "Conta", items: [
     { to: "/integracoes", label: "Integrações", icon: Plug },
     { to: "/configuracoes", label: "Configurações", icon: Settings },
-    { to: "/perfil", label: "Perfil", icon: UserCircle },
-    { to: "/admin", label: "Administração", icon: ShieldCheck },
+    { to: "/dados", label: "Dados e backup", icon: ShieldCheck },
   ]},
 ];
 
@@ -46,7 +45,7 @@ const BOTTOM = [
 ];
 
 function SideNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { profile, orgName, signOut } = useAuth();
+  const { settings } = useSettings();
   return (
     <div className="flex h-full flex-col">
       <div className="px-5 py-5"><Logo /></div>
@@ -67,13 +66,13 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
       <div className="border-t border-white/[0.06] p-3">
         <div className="flex items-center gap-3 rounded-xl px-2 py-2">
           <div className="grid size-9 place-items-center rounded-full bg-lime-400/15 text-lime-400 heading font-semibold">
-            {(profile?.full_name ?? profile?.email ?? "?").slice(0, 1).toUpperCase()}
+            {(settings.seller_name ?? "V").slice(0, 1).toUpperCase()}
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-white">{profile?.full_name ?? "Usuário"}</div>
-            <div className="truncate text-[11px] text-ink-400">{orgName}</div>
-          </div>
-          <button onClick={signOut} title="Sair" className="rounded-lg p-2 text-ink-400 hover:bg-white/5 hover:text-rose-300"><LogOut className="size-4" /></button>
+          <NavLink to="/configuracoes" onClick={onNavigate} className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-white">{settings.seller_name ?? "Vendedor"}</div>
+            <div className="truncate text-[11px] text-ink-400">{settings.seller_company ?? "Dados salvos neste navegador"}</div>
+          </NavLink>
+          <UserCircle className="size-4 text-ink-500" />
         </div>
       </div>
     </div>

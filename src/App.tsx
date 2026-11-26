@@ -1,14 +1,10 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
-import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { BatchRunnerProvider } from "./hooks/useBatchRunner";
-import { isSupabaseConfigured } from "./lib/supabase";
 import { AppShell } from "./components/layout/AppShell";
 import { PageLoader } from "./components/ui";
-import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage, SetupRequired } from "./pages/Auth";
-import { LogoMark } from "./components/layout/Logo";
 
 const named = <T extends string>(loader: () => Promise<Record<T, any>>, name: T) => lazy(() => loader().then((m) => ({ default: m[name] })));
 const DashboardPage = named(() => import("./pages/Dashboard"), "DashboardPage");
@@ -28,44 +24,21 @@ const FavoritesPage = named(() => import("./pages/Favorites"), "FavoritesPage");
 const ReportsPage = named(() => import("./pages/Reports"), "ReportsPage");
 const IntegrationsPage = named(() => import("./pages/Integrations"), "IntegrationsPage");
 const SettingsPage = named(() => import("./pages/Settings"), "SettingsPage");
-const ProfilePage = named(() => import("./pages/Settings"), "ProfilePage");
-const AdminPage = named(() => import("./pages/Admin"), "AdminPage");
+const DataPage = named(() => import("./pages/Admin"), "DataPage");
 const BatchPage = named(() => import("./pages/Batch"), "BatchPage");
 const BatchDetailPage = named(() => import("./pages/Batch"), "BatchDetailPage");
 const ComparePage = named(() => import("./pages/Compare"), "ComparePage");
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } } });
 
-function Splash() {
-  return <div className="grid min-h-screen place-items-center"><div className="flex flex-col items-center gap-4 animate-fade-in"><LogoMark className="size-16" /><span className="heading text-sm tracking-widest text-ink-300">RADAR LOCAL PRO</span></div></div>;
-}
-
-function Protected({ children }: { children: ReactNode }) {
-  const { session, loading } = useAuth();
-  if (loading) return <Splash />;
-  if (!session) return <Navigate to="/login" replace />;
-  return <BatchRunnerProvider>{children}</BatchRunnerProvider>;
-}
-
-function PublicOnly({ children }: { children: ReactNode }) {
-  const { session, loading } = useAuth();
-  if (loading) return <Splash />;
-  return session ? <Navigate to="/" replace /> : <>{children}</>;
-}
-
 export default function App() {
-  if (!isSupabaseConfigured) return <SetupRequired />;
   return (
     <QueryClientProvider client={qc}>
-      <AuthProvider>
+      <BatchRunnerProvider>
         <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-              <Route path="/cadastro" element={<PublicOnly><SignupPage /></PublicOnly>} />
-              <Route path="/recuperar-senha" element={<ForgotPasswordPage />} />
-              <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
-              <Route element={<Protected><AppShell /></Protected>}>
+              <Route element={<AppShell />}>
                 <Route index element={<DashboardPage />} />
                 <Route path="pesquisa" element={<NewSearchPage />} />
                 <Route path="resultados" element={<ResultsPage />} />
@@ -87,14 +60,15 @@ export default function App() {
                 <Route path="relatorios" element={<ReportsPage />} />
                 <Route path="integracoes" element={<IntegrationsPage />} />
                 <Route path="configuracoes" element={<SettingsPage />} />
-                <Route path="perfil" element={<ProfilePage />} />
-                <Route path="admin" element={<AdminPage />} />
+                <Route path="perfil" element={<Navigate to="/configuracoes" replace />} />
+                <Route path="dados" element={<DataPage />} />
+                <Route path="admin" element={<Navigate to="/dados" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
           </Suspense>
         </BrowserRouter>
-      </AuthProvider>
+      </BatchRunnerProvider>
       <Toaster theme="dark" position="top-right" richColors toastOptions={{ style: { background: "#11141a", border: "1px solid rgba(255,255,255,.08)" } }} />
     </QueryClientProvider>
   );

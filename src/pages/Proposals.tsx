@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Plus, Trash2, Download, Copy, Share2, MessageCircle, Save, Sparkles, Send } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { callFunction, errorMessage } from "../lib/api";
-import { useAuth } from "../hooks/useAuth";
+import { FileText, Plus, Trash2, Download, Copy, Share2, MessageCircle, Save, Send } from "lucide-react";
+import { db, uid, nowIso, ensureLead, updateLead } from "../lib/db";
+import { useSettings } from "../hooks/useSettings";
 import { PROPOSAL_TEMPLATES, type ProposalContent } from "../lib/proposalTemplates";
 import { buildProposalPdf, proposalText } from "../lib/proposalPdf";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, PageHeader, PageLoader } from "../components/ui";
@@ -18,18 +17,20 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export function ProposalsPage() {
-  const { orgId } = useAuth();
   const nav = useNavigate();
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["proposals", orgId],
-    enabled: !!orgId,
-    queryFn: async () => (await supabase.from("proposals").select("*, businesses(name, city)").eq("organization_id", orgId!).order("created_at", { ascending: false })).data ?? [],
+    queryKey: ["proposals"],
+    queryFn: async () => {
+      const list = (await db.proposals.toArray()).sort((a, b) => b.created_at.localeCompare(a.created_at));
+      const biz = await db.businesses.bulkGet(list.map((p) => p.business_id ?? ""));
+      return list.map((p, i) => ({ ...p, businesses: biz[i] ? { name: biz[i]!.name, city: biz[i]!.city } : null }));
+    },
   });
-  const setStatus = async (id: string, status: string) => {
-    const { error } = await supabase.from("proposals").update({ status }).eq("id", id);
-    if (error) return toast.error(error.message);
+  const setStatus = async (id: string, status: any) => {
+    await db.proposals.update(id, { status, updated_at: nowIso() });
     qc.invalidateQueries({ queryKey: ["proposals"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
   };
   return (
     <>
@@ -71,7 +72,7 @@ export function ProposalEditorPage() {
   const [sp, setSp] = useSearchParams();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const { orgId, user, settings } = useAuth();
+  const { settings } = useSettings();
   const [proposalId, setProposalId] = useState<string | null>(id ?? null);
   const [businessId, setBusinessId] = useState<string | null>(sp.get("business"));
   const [template, setTemplate] = useState("profissional");
@@ -79,15 +80,14 @@ export function ProposalEditorPage() {
   const [contact, setContact] = useState("");
   const [c, setC] = useState<ProposalContent>(() => emptyContent("profissional", 15));
   const [saving, setSaving] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
 
   // Carrega proposta existente
   useQuery({
     queryKey: ["proposal", id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("proposals").select("*").eq("id", id!).single();
-      if (error) throw error;
+      const data = await db.proposals.get(id!);
+      if (!data) throw new Error("Proposta não encontrada");
       setBusinessId(data.business_id); setTemplate(data.template); setTitle(data.title); setContact(data.contact_name ?? ""); setC(data.content);
       return data;
     },
@@ -97,12 +97,9 @@ export function ProposalEditorPage() {
     queryKey: ["proposal-biz", businessId],
     enabled: !!businessId,
     queryFn: async () => {
-      const [b, o, l] = await Promise.all([
-        supabase.from("businesses").select("*").eq("id", businessId!).single(),
-        supabase.from("opportunities").select("*").eq("business_id", businessId!).maybeSingle(),
-        supabase.from("leads").select("id, contact_name, potential_value").eq("business_id", businessId!).maybeSingle(),
-      ]);
-      return { b: b.data, o: o.data, l: l.data };
+      const [b, o] = await Promise.all([db.businesses.get(businessId!), db.opportunities.get(businessId!)]);
+      const l = b ? await ensureLead(b.id) : null;
+      return { b: b ?? null, o: o ?? null, l };
     },
   });
 
@@ -138,18 +135,21 @@ export function ProposalEditorPage() {
   const save = async (status?: string) => {
     if (!businessId) { toast.error("Selecione o estabelecimento"); return null; }
     setSaving(true);
-    const row = { organization_id: orgId, business_id: businessId, lead_id: biz.data?.l?.id ?? null, user_id: user!.id, template, title, contact_name: contact || null, content: c, total_value: total, ...(status ? { status, sent_at: status === "sent" ? new Date().toISOString() : null } : {}) };
-    const res = proposalId ? await supabase.from("proposals").update(row).eq("id", proposalId).select().single() : await supabase.from("proposals").insert(row).select().single();
+    const pid = proposalId ?? uid();
+    const prev = proposalId ? await db.proposals.get(proposalId) : undefined;
+    const row = { id: pid, business_id: businessId, lead_id: biz.data?.l?.id ?? null, template, title, contact_name: contact || null, content: c, total_value: total,
+      status: (status ?? prev?.status ?? "draft") as any, sent_at: status === "sent" ? nowIso() : (prev?.sent_at ?? null), created_at: prev?.created_at ?? nowIso(), updated_at: nowIso() };
+    await db.proposals.put(row);
     setSaving(false);
-    if (res.error) { toast.error(res.error.message); return null; }
-    if (!proposalId) { setProposalId(res.data.id); nav(`/propostas/${res.data.id}`, { replace: true }); }
+    if (!proposalId) { setProposalId(pid); nav(`/propostas/${pid}`, { replace: true }); }
     qc.invalidateQueries({ queryKey: ["proposals"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
     if (status === "sent" && biz.data?.l?.id) {
-      await supabase.from("leads").update({ status: "proposta_enviada", potential_value: biz.data.l.potential_value ?? total }).eq("id", biz.data.l.id);
-      await supabase.from("lead_notes").insert({ organization_id: orgId, lead_id: biz.data.l.id, user_id: user!.id, kind: "proposal", content: `Proposta "${title}" enviada — ${fmtMoney(total)}` });
+      await updateLead(biz.data.l.id, { status: "proposta_enviada", potential_value: biz.data.l.potential_value ?? total });
+      await db.lead_notes.add({ id: uid(), lead_id: biz.data.l.id, kind: "proposal", content: `Proposta "${title}" enviada — ${fmtMoney(total)}`, created_at: nowIso() });
     }
     toast.success(status === "sent" ? "Proposta marcada como enviada e CRM atualizado" : "Proposta salva");
-    return res.data;
+    return row;
   };
   const pdf = () => buildProposalPdf({ title, businessName, contactName: contact, template, content: c, seller });
   const fileName = `proposta-${businessName.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.pdf`;
@@ -161,18 +161,6 @@ export function ProposalEditorPage() {
     } else if (navigator.share) {
       try { await navigator.share({ title, text: text() }); } catch { /* cancelado */ }
     } else { await copyText(text()); toast.success("Compartilhamento indisponível: texto copiado"); }
-  };
-  const aiFill = async () => {
-    if (!businessId) return toast.error("Selecione o estabelecimento");
-    setAiLoading(true);
-    try {
-      const r = await callFunction<{ text: string }>("ai-assistant", { business_id: businessId, task: "proposal_text" });
-      const json = JSON.parse(r.text.replace(/^```(json)?|```$/gm, "").trim());
-      setC((prev) => ({ ...prev, diagnosis: json.diagnosis ?? prev.diagnosis, problems: Array.isArray(json.problems) ? json.problems : prev.problems, solution: json.solution ?? prev.solution, features: Array.isArray(json.features) ? json.features : prev.features }));
-      toast.success("Textos preenchidos pela IA — revise antes de enviar");
-    } catch (e) {
-      toast.error(e instanceof SyntaxError ? "A IA retornou um formato inesperado. Tente novamente." : errorMessage(e));
-    } finally { setAiLoading(false); }
   };
   const listEditor = (key: "problems" | "features", label: string) => (
     <Field label={label}>
@@ -209,7 +197,6 @@ export function ProposalEditorPage() {
               <Field label="Título"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
               <Field label="Nome do responsável (se informado)"><input className="input" value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
             </div>
-            <div className="flex justify-end"><Button size="sm" variant="outline" icon={Sparkles} loading={aiLoading} onClick={aiFill}>Preencher textos com IA</Button></div>
             <Field label="Diagnóstico digital"><textarea className="input min-h-24" value={c.diagnosis} onChange={(e) => setC({ ...c, diagnosis: e.target.value })} /></Field>
             {listEditor("problems", "Problemas identificados (fatos verificados)")}
             <Field label="Solução recomendada"><textarea className="input min-h-20" value={c.solution} onChange={(e) => setC({ ...c, solution: e.target.value })} /></Field>

@@ -1,27 +1,32 @@
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, CheckCircle2, Circle, TrendingUp, PhoneCall, FileText, ListChecks } from "lucide-react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../hooks/useAuth";
+import { db, nowIso } from "../lib/db";
 import { Card, CardHeader, PageHeader, PageLoader, StatCard } from "../components/ui";
 import { fmtDate, fmtDateTime } from "../lib/format";
 
 export function AgendaPage() {
-  const { orgId, user } = useAuth();
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["agenda", orgId],
-    enabled: !!orgId,
+    queryKey: ["agenda"],
     queryFn: async () => {
       const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
-      const [tasks, follow, notes, doneTasks, props] = await Promise.all([
-        supabase.from("lead_tasks").select("*, leads(business_id, businesses(name, city))").eq("organization_id", orgId!).eq("done", false).order("due_at", { nullsFirst: false }).limit(500),
-        supabase.from("leads").select("id, business_id, next_follow_up, status, businesses(name, city)").eq("organization_id", orgId!).not("next_follow_up", "is", null).not("status", "in", "(fechado,perdido)").order("next_follow_up").limit(500),
-        supabase.from("lead_notes").select("id", { count: "exact", head: true }).eq("organization_id", orgId!).eq("user_id", user!.id).in("kind", ["call", "whatsapp", "email", "meeting", "visit"]).gte("created_at", weekAgo),
-        supabase.from("lead_tasks").select("id", { count: "exact", head: true }).eq("organization_id", orgId!).eq("done", true).gte("done_at", weekAgo),
-        supabase.from("proposals").select("id", { count: "exact", head: true }).eq("organization_id", orgId!).gte("created_at", weekAgo),
-      ]);
-      return { tasks: tasks.data ?? [], follow: follow.data ?? [], contacts: notes.count ?? 0, done: doneTasks.count ?? 0, proposals: props.count ?? 0 };
+      const withBiz = async (leadId: string) => {
+        const lead = await db.leads.get(leadId);
+        const b = lead ? await db.businesses.get(lead.business_id) : undefined;
+        return { business_id: lead?.business_id, businesses: { name: b?.name, city: b?.city } };
+      };
+      const tasks = await Promise.all((await db.lead_tasks.filter((t) => !t.done).toArray())
+        .sort((a, b) => (a.due_at ?? "9").localeCompare(b.due_at ?? "9")).slice(0, 500).map(async (t) => ({ ...t, leads: await withBiz(t.lead_id) })));
+      const leads = (await db.leads.filter((l) => !!l.next_follow_up && !["fechado", "perdido"].includes(l.status)).toArray()).sort((a, b) => a.next_follow_up!.localeCompare(b.next_follow_up!));
+      const lb = await db.businesses.bulkGet(leads.map((l) => l.business_id));
+      return {
+        tasks,
+        follow: leads.map((l, i) => ({ ...l, businesses: { name: lb[i]?.name, city: lb[i]?.city } })),
+        contacts: await db.lead_notes.filter((n) => ["call", "whatsapp", "email", "meeting", "visit"].includes(n.kind) && n.created_at >= weekAgo).count(),
+        done: await db.lead_tasks.filter((t) => t.done && (t.done_at ?? "") >= weekAgo).count(),
+        proposals: await db.proposals.filter((p) => p.created_at >= weekAgo).count(),
+      };
     },
   });
   if (q.isLoading || !q.data) return <PageLoader />;
@@ -35,7 +40,7 @@ export function AgendaPage() {
     { label: "Depois / sem data", filter: (d: Date | null) => !d || d >= week, cls: "text-ink-300" },
   ];
   const toggle = async (t: any) => {
-    await supabase.from("lead_tasks").update({ done: true, done_at: new Date().toISOString() }).eq("id", t.id);
+    await db.lead_tasks.update(t.id, { done: true, done_at: nowIso() });
     qc.invalidateQueries({ queryKey: ["agenda"] });
   };
   return (

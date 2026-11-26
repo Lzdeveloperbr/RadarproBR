@@ -1,7 +1,6 @@
 import { useSearchParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { GitCompare, CheckCircle2, XCircle, HelpCircle } from "lucide-react";
-import { useAuth } from "../hooks/useAuth";
 import { fetchBusinesses } from "../lib/filters";
 import { Card, EmptyState, PageHeader, PageLoader, ScoreRing } from "../components/ui";
 import { BusinessPicker } from "../components/BusinessPicker";
@@ -12,11 +11,11 @@ const ROWS: [string, (b: Business) => React.ReactNode][] = [
   ["Categoria", (b) => b.category],
   ["Cidade", (b) => [b.neighborhood, b.city].filter(Boolean).join(", ")],
   ["Presença digital", (b) => <DigitalStatusBadge status={b.digital_status} />],
-  ["Avaliação", (b) => (b.rating != null ? `${b.rating}★ (${b.user_rating_count})` : null)],
+  ["Horário publicado", (b) => !!b.opening_hours],
   ["Telefone", (b) => b.phone],
   ["Site próprio", (b) => b.has_own_site],
   ["Site online", (b) => b.site_online],
-  ["HTTPS", (b) => b.site_https],
+  ["Responde em HTTPS", (b) => b.site_https],
   ["Preparado p/ celular", (b) => b.site_mobile_ready],
   ["Localização no site", (b) => b.site_has_location],
   ["WhatsApp", (b) => b.has_whatsapp],
@@ -33,10 +32,9 @@ function Val({ v }: { v: React.ReactNode }) {
 }
 
 export function ComparePage() {
-  const { orgId } = useAuth();
   const [sp, setSp] = useSearchParams();
   const ids = (sp.get("ids") ?? "").split(",").filter(Boolean).slice(0, 4);
-  const q = useQuery({ queryKey: ["compare", ids.join()], enabled: !!orgId && ids.length > 0, queryFn: () => fetchBusinesses(orgId!, { ids }) });
+  const q = useQuery({ queryKey: ["compare", ids.join()], enabled: ids.length > 0, queryFn: () => fetchBusinesses({ ids }) });
   const add = (id: string) => !ids.includes(id) && ids.length < 4 && setSp({ ids: [...ids, id].join(",") });
   const remove = (id: string) => setSp({ ids: ids.filter((x) => x !== id).join(",") });
   return (

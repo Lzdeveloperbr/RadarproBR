@@ -18,6 +18,8 @@ export interface ScoringInput {
   rating?: number | null;
   ratingCount?: number | null;
   sourceName?: string;
+  /** false quando o conteúdo do site ainda não foi verificado (nem automática nem manualmente). */
+  contentVerified?: boolean;
 }
 
 export interface ScoringResult {
@@ -94,6 +96,22 @@ export function computeOpportunity(input: ScoringInput): ScoringResult {
     status = "site_pending";
     score += 20;
     reasons.push({ kind: "fact", text: "Site identificado, análise ainda incompleta", weight: 20 });
+    if (input.ownSite.https === false) {
+      status = "site_issues";
+      score += 25;
+      reasons.push({ kind: "fact", text: "O site não respondeu com conexão segura (HTTPS) — pode estar sem certificado ou fora do ar", weight: 25 });
+      products.add("Certificado SSL / HTTPS");
+    }
+  } else if (input.contentVerified === false) {
+    status = input.ownSite.https === false ? "site_issues" : "site_pending";
+    score += 30;
+    reasons.push({ kind: "fact", text: `Site ${input.ownSite.url} respondeu${input.ownSite.https ? " com HTTPS" : ""}`, weight: 0 });
+    reasons.push({ kind: "estimate", text: "Conteúdo do site ainda não verificado — confira WhatsApp, agendamento, localização e versão para celular no checklist", weight: 30 });
+    if (input.ownSite.https === false) {
+      score += 12;
+      reasons.push({ kind: "fact", text: "Site sem HTTPS (conexão não segura)", weight: 12 });
+      products.add("Certificado SSL / HTTPS");
+    }
   } else {
     // Site online: pontuar lacunas verificadas
     const gaps: [string, string, number, string?][] = [

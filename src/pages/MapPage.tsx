@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Map as MapIcon, Navigation, ExternalLink, X, Globe, Phone, Star } from "lucide-react";
-import { useAuth } from "../hooks/useAuth";
 import { fetchBusinesses, type BusinessFilters } from "../lib/filters";
 import type { Business } from "../lib/types";
 import { Button, Card, PageHeader } from "../components/ui";
@@ -12,10 +11,9 @@ import { DigitalStatusBadge, OpportunityBadge } from "../components/ui/StatusBad
 import { mapsRoute } from "../lib/format";
 
 export function MapPage() {
-  const { orgId } = useAuth();
   const [filters, setFilters] = useState<BusinessFilters>({});
   const [sel, setSel] = useState<Business | null>(null);
-  const q = useQuery({ queryKey: ["businesses", "map", orgId, filters], enabled: !!orgId, queryFn: () => fetchBusinesses(orgId!, filters, 3000) });
+  const q = useQuery({ queryKey: ["businesses", "map", filters], queryFn: () => fetchBusinesses(filters, 5000) });
   const items = q.data ?? [];
   const located = items.filter((b) => b.lat != null).length;
 
@@ -37,6 +35,7 @@ export function MapPage() {
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5"><DigitalStatusBadge status={sel.digital_status} /><OpportunityBadge level={sel.opportunity_level} score={sel.opportunity_score} /></div>
             <div className="mt-3 space-y-1 text-xs text-ink-300">
+              {sel.osm_url && <a className="text-lime-400 hover:underline" href={sel.osm_url} target="_blank" rel="noreferrer">Ver no OpenStreetMap</a>}
               {sel.rating != null && <div className="flex items-center gap-1.5"><Star className="size-3.5 text-amber-300" />{sel.rating} ({sel.user_rating_count} avaliações)</div>}
               {sel.phone && <div className="flex items-center gap-1.5"><Phone className="size-3.5" />{sel.phone}</div>}
               <div className="flex items-center gap-1.5"><Globe className="size-3.5" />{sel.primary_website ?? "Site próprio não identificado"}</div>

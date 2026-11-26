@@ -1,15 +1,14 @@
-// Fila persistente de pesquisas/análises em lote, processada pelo navegador do usuário com
-// pausa, continuação, cancelamento e retentativas com backoff exponencial. O estado fica no banco
-// (batch_jobs / batch_job_items), então o progresso sobrevive a recarregamentos.
+// Fila persistente de pesquisas/análises em lote, processada no navegador, com pausa, continuação,
+// cancelamento e retentativas com espera crescente. O estado fica no IndexedDB: sobrevive a recarregamentos.
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { supabase } from "../lib/supabase";
-import { callFunction, ApiError, errorMessage } from "../lib/api";
-import { useAuth } from "./useAuth";
+import { db, uid, nowIso } from "../lib/db";
+import { searchPlaces, auditBusiness, type SearchParams } from "../lib/services";
+import type { BatchItem } from "../lib/types";
 
 export type ItemPayload =
-  | { type: "search"; params: Record<string, unknown>; auto_audit: boolean }
+  | { type: "search"; params: SearchParams; auto_audit: boolean }
   | { type: "audit"; business_id: string; search_id?: string };
 
 interface Runner {
@@ -21,120 +20,93 @@ interface Runner {
 }
 
 const Ctx = createContext<Runner | null>(null);
-const CONCURRENCY = 3;
+const CONCURRENCY = 2; // servidores públicos do OpenStreetMap: poucas requisições simultâneas
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function isPermanent(e: unknown) {
-  return e instanceof ApiError && [400, 401, 403, 404, 412, 413, 422].includes(e.status);
-}
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const isPermanent = (e: unknown) => /Selecione|Informe|não encontrad|inválid/i.test(errMsg(e));
 
 export function BatchRunnerProvider({ children }: { children: ReactNode }) {
-  const { user, orgId } = useAuth();
   const qc = useQueryClient();
   const active = useRef(new Set<string>());
 
   const refreshCounts = useCallback(async (jobId: string) => {
-    const { data } = await supabase.from("batch_job_items").select("status, result, payload").eq("batch_job_id", jobId);
-    const items = data ?? [];
-    const found = items.filter((i) => (i.payload as any).type === "search" && i.status === "done").reduce((n, i) => n + ((i.result as any)?.found ?? 0), 0);
-    const analyzed = items.filter((i) => (i.payload as any).type === "audit" && i.status === "done").length;
-    await supabase.from("batch_jobs").update({
+    const items = await db.batch_items.where("batch_job_id").equals(jobId).toArray();
+    await db.batch_jobs.update(jobId, {
       total_items: items.length,
       done_items: items.filter((i) => i.status === "done").length,
       failed_items: items.filter((i) => i.status === "failed").length,
-      found_count: found,
-      analyzed_count: analyzed,
-    }).eq("id", jobId);
+      found_count: items.filter((i) => i.payload.type === "search" && i.status === "done").reduce((n, i) => n + (i.result?.found ?? 0), 0),
+      analyzed_count: items.filter((i) => i.payload.type === "audit" && i.status === "done").length,
+      updated_at: nowIso(),
+    });
+    qc.invalidateQueries({ queryKey: ["batch"] });
     return items;
-  }, []);
+  }, [qc]);
 
-  const processItem = useCallback(async (jobId: string, item: any) => {
+  const processItem = useCallback(async (jobId: string, item: BatchItem) => {
     const p = item.payload as ItemPayload;
     try {
       let result: any;
       if (p.type === "search") {
-        result = await callFunction("search-places", { ...p.params, batch_job_id: jobId });
-        if (p.auto_audit && result.business_ids?.length) {
-          // Analisa apenas os estabelecimentos ainda não analisados
-          const ids: string[] = result.business_ids;
-          const pending: string[] = [];
-          for (let i = 0; i < ids.length; i += 200) {
-            const { data } = await supabase.from("businesses").select("id").in("id", ids.slice(i, i + 200)).is("analyzed_at", null);
-            pending.push(...(data ?? []).map((d) => d.id));
-          }
-          if (pending.length) {
-            const { data: last } = await supabase.from("batch_job_items").select("seq").eq("batch_job_id", jobId).order("seq", { ascending: false }).limit(1);
-            const base = (last?.[0]?.seq ?? 0) + 1;
-            await supabase.from("batch_job_items").insert(pending.map((id, i) => ({
-              organization_id: orgId, batch_job_id: jobId, seq: base + i,
-              payload: { type: "audit", business_id: id, search_id: result.search?.id },
-            })));
-          }
+        const r = await searchPlaces({ ...p.params, batch_job_id: jobId });
+        if (p.auto_audit && r.business_ids.length) {
+          const pending = (await db.businesses.bulkGet(r.business_ids)).filter((b) => b && !b.analyzed_at).map((b) => b!.id);
+          const last = await db.batch_items.where("batch_job_id").equals(jobId).toArray();
+          const base = Math.max(0, ...last.map((x) => x.seq)) + 1;
+          await db.batch_items.bulkAdd(pending.map((id, i) => ({ id: uid(), batch_job_id: jobId, seq: base + i, payload: { type: "audit", business_id: id, search_id: r.search.id },
+            status: "pending" as const, attempts: 0, max_attempts: 3, next_attempt_at: null, result: null, error: null, started_at: null, finished_at: null })));
         }
-        result = { found: result.found, new: result.new, search_id: result.search?.id };
+        result = { found: r.found, new: r.new, search_id: r.search.id };
         qc.invalidateQueries({ queryKey: ["searches"] });
       } else {
-        const r = await callFunction("audit-business", { business_id: p.business_id });
-        result = { score: r.opportunity?.score, level: r.opportunity?.level, status: r.status };
-        qc.invalidateQueries({ queryKey: ["business", p.business_id] });
+        const r = await auditBusiness(p.business_id);
+        const b = await db.businesses.get(p.business_id);
+        result = { score: r.opportunity.score, level: r.opportunity.level, status: r.status, name: b?.name };
       }
-      await supabase.from("batch_job_items").update({ status: "done", result, error: null, finished_at: new Date().toISOString() }).eq("id", item.id);
+      await db.batch_items.update(item.id, { status: "done", result, error: null, finished_at: nowIso() });
     } catch (e) {
       const attempts = item.attempts + 1;
-      const permanent = isPermanent(e);
-      const retry = !permanent && attempts < item.max_attempts;
-      const wait = e instanceof ApiError && e.status === 429 ? 30_000 : 5000 * 2 ** (attempts - 1);
-      await supabase.from("batch_job_items").update({
-        status: retry ? "pending" : "failed",
-        error: errorMessage(e).slice(0, 500),
-        next_attempt_at: retry ? new Date(Date.now() + wait).toISOString() : null,
-        finished_at: retry ? null : new Date().toISOString(),
-      }).eq("id", item.id);
-      if (e instanceof ApiError && e.status === 412) {
-        // Integração ausente: pausa a fila e avisa o usuário
-        await supabase.from("batch_jobs").update({ status: "paused" }).eq("id", jobId);
-        toast.error(errorMessage(e), { duration: 10000 });
-      }
+      const retry = !isPermanent(e) && attempts < item.max_attempts;
+      const wait = /429|limitou/.test(errMsg(e)) ? 60_000 : 8000 * 2 ** (attempts - 1);
+      await db.batch_items.update(item.id, {
+        status: retry ? "pending" : "failed", attempts, error: errMsg(e).slice(0, 500),
+        next_attempt_at: retry ? new Date(Date.now() + wait).toISOString() : null, finished_at: retry ? null : nowIso(),
+      });
     }
-  }, [orgId, qc]);
+  }, [qc]);
 
   const processJob = useCallback(async (jobId: string) => {
     if (active.current.has(jobId)) return;
     active.current.add(jobId);
     try {
-      // Libera itens presos em "running" (aba fechada durante o processamento)
-      await supabase.from("batch_job_items").update({ status: "pending" }).eq("batch_job_id", jobId).eq("status", "running")
-        .lt("started_at", new Date(Date.now() - 3 * 60_000).toISOString());
+      await db.batch_items.where("[batch_job_id+status]").equals([jobId, "running"]).modify({ status: "pending" });
       const inFlight = new Set<Promise<void>>();
       while (true) {
-        const { data: job } = await supabase.from("batch_jobs").select("status").eq("id", jobId).single();
+        const job = await db.batch_jobs.get(jobId);
         if (!job || job.status !== "running") break;
         const slots = CONCURRENCY - inFlight.size;
         if (slots > 0) {
-          const { data: next } = await supabase.from("batch_job_items").select("*").eq("batch_job_id", jobId).eq("status", "pending")
-            .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`).order("seq").limit(slots);
-          for (const item of next ?? []) {
-            // Reserva atômica do item (evita processamento duplicado em várias abas)
-            const { data: claimed } = await supabase.from("batch_job_items")
-              .update({ status: "running", attempts: item.attempts + 1, started_at: new Date().toISOString() })
-              .eq("id", item.id).eq("status", "pending").select("id");
-            if (!claimed?.length) continue;
+          const now = nowIso();
+          const next = (await db.batch_items.where("[batch_job_id+status]").equals([jobId, "pending"]).toArray())
+            .filter((i) => !i.next_attempt_at || i.next_attempt_at <= now).sort((a, b) => a.seq - b.seq).slice(0, slots);
+          for (const item of next) {
+            await db.batch_items.update(item.id, { status: "running", started_at: nowIso() });
             const pr: Promise<void> = processItem(jobId, item).finally(() => { inFlight.delete(pr); refreshCounts(jobId); });
             inFlight.add(pr);
           }
         }
         if (inFlight.size === 0) {
-          const { count: pending } = await supabase.from("batch_job_items").select("id", { count: "exact", head: true }).eq("batch_job_id", jobId).in("status", ["pending", "running"]);
+          const pending = await db.batch_items.where("batch_job_id").equals(jobId).filter((i) => i.status === "pending" || i.status === "running").count();
           if (!pending) {
             const items = await refreshCounts(jobId);
             const failed = items.filter((i) => i.status === "failed").length;
-            await supabase.from("batch_jobs").update({ status: items.length && failed === items.length ? "failed" : "completed" }).eq("id", jobId);
-            // Atualiza total analisado das pesquisas do lote
-            for (const sid of new Set(items.map((i) => (i.result as any)?.search_id).filter(Boolean))) {
-              const { data: links } = await supabase.from("search_results").select("business_id, businesses!inner(analyzed_at)").eq("search_id", sid).not("businesses.analyzed_at", "is", null);
-              await supabase.from("searches").update({ total_analyzed: links?.length ?? 0 }).eq("id", sid);
+            await db.batch_jobs.update(jobId, { status: items.length && failed === items.length ? "failed" : "completed", updated_at: nowIso() });
+            for (const sid of new Set(items.map((i) => i.result?.search_id).filter(Boolean))) {
+              const ids = (await db.search_results.where("search_id").equals(sid).toArray()).map((r) => r.business_id);
+              const analyzed = (await db.businesses.bulkGet(ids)).filter((b) => b?.analyzed_at).length;
+              await db.searches.update(sid, { total_analyzed: analyzed });
             }
-            toast.success("Processamento em lote concluído");
+            toast.success(failed ? `Processamento concluído com ${failed} falha(s)` : "Processamento concluído");
             break;
           }
           await sleep(1500);
@@ -143,57 +115,39 @@ export function BatchRunnerProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (e) {
-      console.error(e);
-      toast.error("Erro na fila de processamento: " + errorMessage(e));
+      toast.error("Erro na fila de processamento: " + errMsg(e));
     } finally {
       active.current.delete(jobId);
-      qc.invalidateQueries({ queryKey: ["batch"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
-      qc.invalidateQueries({ queryKey: ["businesses"] });
+      ["batch", "dashboard", "businesses", "searches", "leads"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     }
   }, [processItem, refreshCounts, qc]);
 
-  // Retoma filas em andamento deste usuário ao abrir o app
   useEffect(() => {
-    if (!user || !orgId) return;
-    supabase.from("batch_jobs").select("id").eq("organization_id", orgId).eq("user_id", user.id).eq("status", "running")
-      .then(({ data }) => (data ?? []).forEach((j) => processJob(j.id)));
-  }, [user, orgId, processJob]);
+    db.batch_jobs.where("status").equals("running").toArray().then((jobs) => jobs.forEach((j) => processJob(j.id)));
+  }, [processJob]);
 
   const runner: Runner = {
     createJob: async (name, kind, items) => {
-      if (!orgId || !user) throw new Error("Sem organização ativa");
-      const { data: job, error } = await supabase.from("batch_jobs").insert({ organization_id: orgId, user_id: user.id, name, kind, status: "running", total_items: items.length }).select().single();
-      if (error) throw error;
-      for (let i = 0; i < items.length; i += 500) {
-        const { error: e2 } = await supabase.from("batch_job_items").insert(items.slice(i, i + 500).map((payload, j) => ({ organization_id: orgId, batch_job_id: job.id, seq: i + j, payload })));
-        if (e2) throw e2;
-      }
+      const id = uid();
+      await db.batch_jobs.add({ id, name, kind, status: "running", total_items: items.length, done_items: 0, failed_items: 0, found_count: 0, analyzed_count: 0, created_at: nowIso(), updated_at: nowIso() });
+      await db.batch_items.bulkAdd(items.map((payload, i) => ({ id: uid(), batch_job_id: id, seq: i, payload, status: "pending" as const, attempts: 0, max_attempts: 3,
+        next_attempt_at: null, result: null, error: null, started_at: null, finished_at: null })));
       qc.invalidateQueries({ queryKey: ["batch"] });
-      processJob(job.id);
-      return job.id as string;
+      processJob(id);
+      return id;
     },
-    pause: async (jobId) => {
-      await supabase.from("batch_jobs").update({ status: "paused" }).eq("id", jobId);
-      qc.invalidateQueries({ queryKey: ["batch"] });
-      toast("Fila pausada. Os itens em andamento serão concluídos.");
-    },
-    resume: async (jobId) => {
-      await supabase.from("batch_jobs").update({ status: "running" }).eq("id", jobId);
-      qc.invalidateQueries({ queryKey: ["batch"] });
-      processJob(jobId);
-    },
-    cancel: async (jobId) => {
-      await supabase.from("batch_jobs").update({ status: "cancelled" }).eq("id", jobId);
-      await supabase.from("batch_job_items").update({ status: "cancelled" }).eq("batch_job_id", jobId).eq("status", "pending");
-      await refreshCounts(jobId);
-      qc.invalidateQueries({ queryKey: ["batch"] });
+    pause: async (id) => { await db.batch_jobs.update(id, { status: "paused" }); qc.invalidateQueries({ queryKey: ["batch"] }); toast("Fila pausada. Os itens em andamento serão concluídos."); },
+    resume: async (id) => { await db.batch_jobs.update(id, { status: "running" }); qc.invalidateQueries({ queryKey: ["batch"] }); processJob(id); },
+    cancel: async (id) => {
+      await db.batch_jobs.update(id, { status: "cancelled" });
+      await db.batch_items.where("[batch_job_id+status]").equals([id, "pending"]).modify({ status: "cancelled" });
+      await refreshCounts(id);
       toast("Fila cancelada");
     },
-    retryFailed: async (jobId) => {
-      await supabase.from("batch_job_items").update({ status: "pending", attempts: 0, next_attempt_at: null, error: null }).eq("batch_job_id", jobId).eq("status", "failed");
-      await supabase.from("batch_jobs").update({ status: "running" }).eq("id", jobId);
-      processJob(jobId);
+    retryFailed: async (id) => {
+      await db.batch_items.where("[batch_job_id+status]").equals([id, "failed"]).modify({ status: "pending", attempts: 0, next_attempt_at: null, error: null });
+      await db.batch_jobs.update(id, { status: "running" });
+      processJob(id);
     },
   };
   return <Ctx.Provider value={runner}>{children}</Ctx.Provider>;

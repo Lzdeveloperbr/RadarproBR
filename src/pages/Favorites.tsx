@@ -1,24 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { Star } from "lucide-react";
-import { useAuth } from "../hooks/useAuth";
 import { useFavorites } from "../hooks/useFavorites";
 import { fetchBusinesses } from "../lib/filters";
-import { supabase } from "../lib/supabase";
+import { db } from "../lib/db";
 import { Card, CardHeader, EmptyState, PageHeader, PageLoader } from "../components/ui";
 import { BusinessList } from "../components/BusinessList";
 
 export function FavoritesPage() {
-  const { orgId } = useAuth();
   const { favorites, isLoading } = useFavorites();
   const ids = [...favorites];
-  const fav = useQuery({ queryKey: ["businesses", "favorites", orgId, ids.join()], enabled: !!orgId && !isLoading, queryFn: () => fetchBusinesses(orgId!, { ids }) });
+  const fav = useQuery({ queryKey: ["businesses", "favorites", ids.join()], enabled: !isLoading, queryFn: () => fetchBusinesses({ ids }) });
   const prio = useQuery({
-    queryKey: ["businesses", "priority", orgId],
-    enabled: !!orgId,
-    queryFn: async () => {
-      const { data } = await supabase.from("leads").select("business_id").eq("organization_id", orgId!).eq("is_priority", true);
-      return fetchBusinesses(orgId!, { ids: (data ?? []).map((d) => d.business_id) });
-    },
+    queryKey: ["businesses", "priority"],
+    queryFn: async () => fetchBusinesses({ ids: (await db.leads.filter((l) => l.is_priority).toArray()).map((d) => d.business_id) }),
   });
   return (
     <>
