@@ -4,6 +4,8 @@ import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  // GitHub Pages publica em /<repositório>/ — o workflow define VITE_BASE.
+  base: process.env.VITE_BASE ?? "/",
   plugins: [
     react(),
     tailwindcss(),
@@ -19,22 +21,22 @@ export default defineConfig({
         background_color: "#08090C",
         display: "standalone",
         orientation: "portrait-primary",
-        start_url: "/",
-        scope: "/",
+        start_url: "./",
+        scope: "./",
         categories: ["business", "productivity"],
         icons: [
-          { src: "/pwa-192.png", sizes: "192x192", type: "image/png" },
-          { src: "/pwa-512.png", sizes: "512x512", type: "image/png" },
-          { src: "/pwa-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "pwa-192.png", sizes: "192x192", type: "image/png" },
+          { src: "pwa-512.png", sizes: "512x512", type: "image/png" },
+          { src: "pwa-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
         shortcuts: [
-          { name: "Nova pesquisa", url: "/pesquisa" },
-          { name: "Mapa", url: "/mapa" },
-          { name: "Kanban", url: "/kanban" },
+          { name: "Nova pesquisa", url: "./pesquisa" },
+          { name: "Mapa", url: "./mapa" },
+          { name: "Kanban", url: "./kanban" },
         ],
       },
       workbox: {
-        navigateFallback: "/index.html",
+        navigateFallback: "index.html",
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [

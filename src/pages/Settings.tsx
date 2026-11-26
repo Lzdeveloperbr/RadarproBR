@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Settings, Save, UserCircle, Briefcase, Radar, Bell, ShieldCheck, Trash2 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase, isRuntimeConfigured, clearRuntimeConfig } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { Button, Card, CardHeader, Field, PageHeader, Toggle } from "../components/ui";
 import { UFS } from "../lib/constants";
@@ -117,6 +117,7 @@ export function ProfilePage() {
           <div className="border-t border-white/[0.06] pt-4 flex flex-wrap gap-2">
             <Button variant="secondary" onClick={exportMine}>Exportar meus dados (LGPD)</Button>
             <Button variant="danger" icon={Trash2} onClick={signOut}>Sair da conta</Button>
+            {isRuntimeConfigured && <Button variant="ghost" onClick={async () => { if (!confirm("Desconectar este navegador do banco de dados?")) return; await signOut(); clearRuntimeConfig(); location.reload(); }}>Trocar banco de dados</Button>}
           </div>
         </Card>
       </div>

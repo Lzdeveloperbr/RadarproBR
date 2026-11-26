@@ -51,9 +51,11 @@ Deno.serve(handler(async (req) => {
   const useWeb = (body.use_web_search ?? settings?.use_web_search ?? true) && !!webSearchProvider();
 
   const now = () => new Date().toISOString();
+  const isOsm = biz.source === "openstreetmap";
+  const sourceName = isOsm ? "OpenStreetMap" : "Google Places";
   const sources: Source[] = [{
-    name: "Google Places", url: biz.google_maps_uri ?? undefined, type: "places",
-    result: biz.places_website_uri ? `Site informado: ${biz.places_website_uri}` : "Nenhum site informado no perfil", at: biz.updated_at,
+    name: sourceName, url: isOsm ? (biz.raw?.osm_url ?? undefined) : (biz.google_maps_uri ?? undefined), type: "places",
+    result: biz.places_website_uri ? `Site informado: ${biz.places_website_uri}` : "Nenhum site informado no cadastro", at: biz.updated_at,
   }];
 
   const { data: sites } = await ctx.sb.from("business_websites").select("*").eq("business_id", biz.id);
@@ -171,7 +173,7 @@ Deno.serve(handler(async (req) => {
 
   // 3) Consolida verificações
   const checks: Record<string, { value: boolean | null; evidence?: string }> = {};
-  checks.own_site = own ? { value: true, evidence: own.url } : { value: webSearchUsed ? false : null, evidence: webSearchUsed ? "Não identificado no Google Places nem na pesquisa na web" : "Não identificado no Google Places" };
+  checks.own_site = own ? { value: true, evidence: own.url } : { value: webSearchUsed ? false : null, evidence: webSearchUsed ? `Não identificado no ${sourceName} nem na pesquisa na web` : `Não identificado no ${sourceName}` };
   checks.site_online = own ? { value: robotsBlocked ? null : (own.is_online ?? null), evidence: ownFetch ? (ownFetch.ok ? `HTTP ${ownFetch.status}` : ownFetch.error ?? `HTTP ${ownFetch.status}`) : robotsBlocked ? "Não verificado (robots.txt)" : undefined } : { value: null };
   checks.https = own && ownFetch ? { value: own.https ?? null, evidence: own.final_url } : { value: null };
   if (ownAnalysis) Object.assign(checks, ownAnalysis.checks);
@@ -182,7 +184,7 @@ Deno.serve(handler(async (req) => {
   }
   // Telefone e horário também podem vir do Google
   if (!checks.phone?.value && biz.phone) checks.phone_places = { value: true, evidence: biz.phone };
-  if (biz.opening_hours) checks.hours_places = { value: true, evidence: "Horário publicado no Google" };
+  if (biz.opening_hours) checks.hours_places = { value: true, evidence: `Horário publicado no ${sourceName}` };
 
   // 4) Contatos e presenças
   const contactRows: any[] = [];
@@ -224,9 +226,10 @@ Deno.serve(handler(async (req) => {
     hasPhone: !!biz.phone || types.has("phone"),
     rating: biz.rating,
     ratingCount: biz.user_rating_count,
+    sourceName,
   });
   if (!webSearchUsed && !own) {
-    result.reasons.push({ kind: "fact", text: "Pesquisa na web não configurada/desativada: status \"site não identificado\" baseado apenas no Google Places", weight: 0 });
+    result.reasons.push({ kind: "fact", text: `Pesquisa na web não configurada/desativada: status "site não identificado" baseado apenas no ${sourceName}`, weight: 0 });
   }
 
   const hasLocation = ownAnalysis ? !!(ownAnalysis.checks.address?.value || ownAnalysis.checks.embedded_map?.value || ownAnalysis.checks.maps_link?.value) : null;

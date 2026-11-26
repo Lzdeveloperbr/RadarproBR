@@ -2,11 +2,12 @@
 import type { Ctx } from "./auth.ts";
 import { HttpError, env } from "./http.ts";
 
-export type Provider = "google_places" | "google_geocoding" | "web_search" | "anthropic" | "site_fetch";
+export type Provider = "google_places" | "google_geocoding" | "openstreetmap" | "web_search" | "anthropic" | "site_fetch";
 
 const DEFAULT_LIMITS: Record<Provider, { perMinute: number; perDay: number }> = {
   google_places: { perMinute: 60, perDay: 3000 },
   google_geocoding: { perMinute: 60, perDay: 1000 },
+  openstreetmap: { perMinute: 20, perDay: 2000 },
   web_search: { perMinute: 30, perDay: 1000 },
   anthropic: { perMinute: 20, perDay: 500 },
   site_fetch: { perMinute: 120, perDay: 10000 },

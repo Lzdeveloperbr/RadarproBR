@@ -40,8 +40,13 @@ export async function geocode(address: string): Promise<{ lat: number; lng: numb
   url.searchParams.set("key", googleKey());
   url.searchParams.set("language", "pt-BR");
   url.searchParams.set("region", "br");
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  const data = await res.json();
+  let data: any;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    data = await res.json();
+  } catch (e) {
+    throw new HttpError(503, `Não foi possível conectar à Geocoding API: ${(e as Error).message}`, "google_unavailable");
+  }
   if (data.status === "ZERO_RESULTS") return null;
   if (data.status !== "OK") {
     throw new HttpError(502, `Geocoding API: ${data.status}${data.error_message ? " — " + data.error_message : ""}`, "geocoding_error");
@@ -78,7 +83,7 @@ export async function textSearch(params: {
     headers: { "Content-Type": "application/json", "X-Goog-Api-Key": googleKey(), "X-Goog-FieldMask": PLACES_FIELD_MASK },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
-  });
+  }).catch((e) => { throw new HttpError(503, `Não foi possível conectar à Google Places API: ${(e as Error).message}`, "google_unavailable"); });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = data?.error?.message ?? res.statusText;

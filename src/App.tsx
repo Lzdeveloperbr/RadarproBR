@@ -58,7 +58,7 @@ export default function App() {
   return (
     <QueryClientProvider client={qc}>
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />

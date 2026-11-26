@@ -1,4 +1,4 @@
-import { supabase, SUPABASE_URL } from "./supabase";
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase";
 
 export class ApiError extends Error {
   status: number;
@@ -23,7 +23,7 @@ export async function callFunction<T = any>(name: string, body?: unknown, opts: 
       method: opts.method ?? "POST",
       headers: {
         Authorization: `Bearer ${session.access_token}`,
-        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
+        apikey: SUPABASE_ANON_KEY ?? "",
         "Content-Type": "application/json",
       },
       body: opts.method === "GET" ? undefined : JSON.stringify(body ?? {}),

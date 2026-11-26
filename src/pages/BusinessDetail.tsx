@@ -148,7 +148,7 @@ export function BusinessDetailPage() {
         <div className="space-y-4 xl:col-span-2">
           {/* Dados comerciais públicos */}
           <Card>
-            <CardHeader title="Dados comerciais públicos" subtitle="Fonte: Google Places" icon={Building2} />
+            <CardHeader title="Dados comerciais públicos" subtitle={`Fonte: ${(b as any).source === "openstreetmap" ? "OpenStreetMap" : "Google Places"}`} icon={Building2} />
             <div className="grid gap-x-8 px-5 pb-5 md:grid-cols-2">
               <div>
                 <Row label="Nome comercial">{b.name}</Row>
@@ -165,7 +165,7 @@ export function BusinessDetailPage() {
                 <Row label="Site">{b.primary_website ? <a className="text-lime-400 hover:underline" href={b.primary_website} target="_blank" rel="noreferrer">{b.primary_website}</a> : null}</Row>
                 <Row label="Instagram">{instagram ? <a className="text-lime-400 hover:underline" href={instagram} target="_blank" rel="noreferrer">{instagram.replace(/^https?:\/\/(www\.)?/, "")}</a> : null}</Row>
                 <Row label="Facebook">{facebook ? <a className="text-lime-400 hover:underline" href={facebook} target="_blank" rel="noreferrer">{facebook.replace(/^https?:\/\/(www\.)?/, "")}</a> : null}</Row>
-                <Row label="Avaliação pública">{b.rating != null ? <span className="inline-flex items-center gap-1"><Star className="size-3.5 fill-amber-300 text-amber-300" />{b.rating} · {b.user_rating_count} avaliações</span> : null}</Row>
+                <Row label="Avaliação pública">{(b as any).source === "openstreetmap" && b.rating == null ? <span className="text-ink-500">Não disponível no OpenStreetMap</span> : b.rating != null ? <span className="inline-flex items-center gap-1"><Star className="size-3.5 fill-amber-300 text-amber-300" />{b.rating} · {b.user_rating_count} avaliações</span> : null}</Row>
                 <Row label="Coordenadas">{b.lat != null ? `${b.lat.toFixed(6)}, ${b.lng?.toFixed(6)}` : null}</Row>
               </div>
             </div>

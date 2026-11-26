@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Mail, Lock, User, Building2, ArrowRight, Radar, MapPin, TrendingUp } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase, appUrl, saveRuntimeConfig } from "../lib/supabase";
 import { Button } from "../components/ui";
 import { Logo } from "../components/layout/Logo";
 
@@ -87,7 +87,7 @@ export function SignupPage() {
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email: f.email.trim(), password: f.password,
-      options: { data: { full_name: f.name.trim(), company: f.company.trim() }, emailRedirectTo: `${location.origin}/` },
+      options: { data: { full_name: f.name.trim(), company: f.company.trim() }, emailRedirectTo: appUrl() },
     });
     setLoading(false);
     if (error) return toast.error(error.message);
@@ -119,7 +119,7 @@ export function ForgotPasswordPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/redefinir-senha` });
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: appUrl("redefinir-senha") });
     setLoading(false);
     if (error) return toast.error(error.message);
     setSent(true);
@@ -164,17 +164,32 @@ export function ResetPasswordPage() {
 }
 
 export function SetupRequired() {
+  const [url, setUrl] = useState("");
+  const [anon, setAnon] = useState("");
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    if (!/^https?:\/\/[^\s/]+/i.test(url.trim())) return toast.error("Informe a URL do projeto Supabase (https://...supabase.co)");
+    if (anon.trim().length < 20) return toast.error("Informe a chave pública (anon / publishable)");
+    saveRuntimeConfig(url, anon);
+    location.reload();
+  };
   return (
     <div className="grid min-h-screen place-items-center p-6">
-      <div className="card max-w-xl p-8">
+      <div className="card max-w-2xl w-full p-8 animate-slide-up">
         <Logo />
-        <h1 className="heading mt-6 text-xl font-semibold text-white">Configuração necessária</h1>
-        <p className="mt-2 text-sm text-ink-300">O frontend ainda não está conectado ao Supabase. Crie o arquivo <code className="text-lime-400">.env.local</code> na raiz do projeto com:</p>
-        <pre className="mt-4 overflow-x-auto rounded-xl bg-ink-950 p-4 text-xs text-ink-200 border border-white/5">{`VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
-VITE_SUPABASE_ANON_KEY=sua-chave-anon-publica
-# opcional (mapa Google; sem ela é usado OpenStreetMap)
-VITE_GOOGLE_MAPS_BROWSER_KEY=chave-restrita-por-referenciador`}</pre>
-        <p className="mt-4 text-sm text-ink-300">Depois aplique as migrações (<code>supabase db push</code>), publique as Edge Functions (<code>supabase functions deploy</code>) e reinicie o servidor. Veja o README para o passo a passo completo.</p>
+        <h1 className="heading mt-6 text-xl font-semibold text-white">Conecte seu banco de dados gratuito</h1>
+        <p className="mt-2 text-sm text-ink-300">O RADAR LOCAL PRO guarda seus dados no <b className="text-white">Supabase</b> (plano gratuito). Em 3 minutos:</p>
+        <ol className="mt-4 space-y-2 text-sm text-ink-200 list-decimal pl-5">
+          <li>Crie uma conta grátis em <a className="text-lime-400 hover:underline" href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">supabase.com</a> e um novo projeto.</li>
+          <li>Em <b>Project Settings → API</b>, copie a <b>Project URL</b> e a chave <b>anon / publishable</b> (é pública, pode colar aqui).</li>
+          <li>O banco e as funções são instalados automaticamente pelo GitHub Actions (veja o README) — ou manualmente com <code className="text-lime-400">supabase db push</code> e <code className="text-lime-400">supabase functions deploy</code>.</li>
+        </ol>
+        <form onSubmit={save} className="mt-6 space-y-3">
+          <input className="input" placeholder="https://xxxxxxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input className="input" placeholder="Chave anon / publishable" value={anon} onChange={(e) => setAnon(e.target.value)} />
+          <Button type="submit" className="w-full">Conectar</Button>
+        </form>
+        <p className="mt-4 text-xs text-ink-500">A configuração fica salva apenas neste navegador. Nunca cole aqui a chave service_role.</p>
       </div>
     </div>
   );

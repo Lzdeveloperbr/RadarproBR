@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Plug, CheckCircle2, Clock, KeyRound, AlertTriangle, Gauge, RefreshCw, MapPinned, Search, Bot, FileDown, Database, Globe2, Map } from "lucide-react";
+import { Plug, CheckCircle2, Map as MapFree, Clock, KeyRound, AlertTriangle, Gauge, RefreshCw, MapPinned, Search, Bot, FileDown, Database, Globe2, Map } from "lucide-react";
 import { callFunction, errorMessage } from "../lib/api";
 import { Badge, Button, Card, PageHeader, PageLoader, ProgressBar } from "../components/ui";
 import { fmtNumber } from "../lib/format";
@@ -15,7 +15,10 @@ const STATE: Record<string, [string, string, any]> = {
 };
 
 const INFO: Record<string, { title: string; icon: any; desc: string; setup: string[] }> = {
-  google_places: { title: "Google Places API (New)", icon: MapPinned, desc: "Pesquisa de estabelecimentos (Text Search).", setup: [
+  openstreetmap: { title: "OpenStreetMap (gratuito)", icon: MapFree, desc: "Pesquisa de estabelecimentos e geocodificação sem chave e sem custo (Overpass + Nominatim).", setup: [
+    "Não requer chave. Usado automaticamente quando o Google não está configurado.",
+    "Para forçar: supabase secrets set SEARCH_PROVIDER=osm"] },
+  google_places: { title: "Google Places API (New) — opcional", icon: MapPinned, desc: "Pesquisa de estabelecimentos com avaliações (requer faturamento no Google Cloud).", setup: [
     "Google Cloud Console → crie um projeto e ative o faturamento.", "Ative \"Places API (New)\" e \"Geocoding API\".",
     "Crie uma chave de API restrita a essas APIs (sem restrição de referenciador, pois é usada no servidor).",
     "supabase secrets set GOOGLE_MAPS_API_KEY=SUA_CHAVE"] },
@@ -57,7 +60,10 @@ export function IntegrationsPage() {
                     <div className="grid size-10 place-items-center rounded-xl bg-white/[0.04] text-lime-400"><info.icon className="size-5" /></div>
                     <div><div className="heading font-semibold text-white">{info.title}</div><div className="text-xs text-ink-400">{info.desc}</div></div>
                   </div>
-                  <Badge className={cls}><Icon className="size-3" />{label}</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge className={cls}><Icon className="size-3" />{label}</Badge>
+                    {v.active && <Badge className="border-lime-400/40 text-lime-400 bg-lime-400/10">Fonte ativa</Badge>}
+                  </div>
                 </div>
                 <p className="mt-3 text-xs text-ink-300">{v.message}{v.provider ? ` · provedor: ${v.provider}` : ""}{v.model ? ` · modelo: ${v.model}` : ""}</p>
                 {u && (
@@ -67,7 +73,7 @@ export function IntegrationsPage() {
                     <div className="text-[11px] text-ink-500">Limite: {u.limits.perMinute}/min · {u.limits.perDay}/dia (ajustável via LIMIT_*_PER_MINUTE / LIMIT_*_PER_DAY)</div>
                   </div>
                 )}
-                {v.state !== "connected" && (
+                {v.state !== "connected" && k !== "openstreetmap" && (
                   <div className="mt-4 rounded-xl bg-ink-950/70 border border-white/5 p-3 text-xs text-ink-300 space-y-1">
                     <div className="text-white font-medium">Como configurar</div>
                     {info.setup.map((s) => <div key={s} className="font-mono text-[11px] break-words">• {s}</div>)}

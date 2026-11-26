@@ -6,6 +6,33 @@ Plataforma SaaS de prospecção comercial: pesquisa estabelecimentos reais em qu
 
 > Nenhum resultado é simulado. Quando uma integração não está configurada, o sistema informa exatamente o que falta.
 
+## 🚀 Publicação 100% gratuita (GitHub Pages + Supabase Free + OpenStreetMap)
+
+Site: **https://lzdeveloperbr.github.io/RadarproBR/**
+
+| Parte | Serviço gratuito |
+|---|---|
+| Site (frontend + PWA) | GitHub Pages |
+| Banco, login, Edge Functions | Supabase — plano Free |
+| Pesquisa de estabelecimentos | OpenStreetMap (Overpass API + Nominatim) — sem chave |
+| Mapa | Leaflet + OpenStreetMap/CARTO — sem chave |
+| PDF, Excel, CSV, prompts Lovable | gerados no próprio app |
+| Opcionais (pagos/cota) | Google Places, busca na web, IA Claude |
+
+**Passo a passo (uma vez só):**
+1. **GitHub Pages:** *Settings → Pages → Build and deployment → Source: GitHub Actions*.
+2. **Supabase:** crie um projeto grátis em supabase.com. Anote o *Project ref* (Project Settings → General), a *senha do banco* e gere um *Access token* em supabase.com/dashboard/account/tokens.
+3. **Repositório → Settings → Secrets and variables → Actions:**
+   - *Secrets*: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`
+   - *Variables*: `SUPABASE_PROJECT_REF`, `VITE_SUPABASE_URL` (https://REF.supabase.co), `VITE_SUPABASE_ANON_KEY` (chave anon/publishable — pública)
+4. Faça um push na `main` (ou rode o workflow *Deploy* manualmente). O GitHub Actions aplica o banco, publica as funções e o site.
+5. No Supabase, em *Authentication → URL Configuration*, coloque `https://lzdeveloperbr.github.io/RadarproBR/` como *Site URL* e adicione `https://lzdeveloperbr.github.io/RadarproBR/**` em *Redirect URLs*.
+
+Se as variáveis `VITE_SUPABASE_*` não forem definidas, o site abre uma tela para colar a URL e a chave pública do Supabase (salvas no navegador).
+
+**Sobre a fonte gratuita (OpenStreetMap):** é usada automaticamente quando não há chave do Google. Comércios que não estão cadastrados no mapa colaborativo não aparecem, e não há avaliações/nota. Para forçar uma fonte: `supabase secrets set SEARCH_PROVIDER=osm` (ou `google`). Na tela de pesquisa também é possível escolher.
+
+
 ## Stack
 
 | Camada | Tecnologia |
@@ -13,7 +40,7 @@ Plataforma SaaS de prospecção comercial: pesquisa estabelecimentos reais em qu
 | Frontend | React 19 + TypeScript + Vite + Tailwind CSS 4, Lucide, Recharts, dnd-kit, TanStack Query |
 | Mapas | Google Maps JS (se `VITE_GOOGLE_MAPS_BROWSER_KEY`) ou Leaflet + OpenStreetMap, com agrupamento |
 | Backend | Supabase (Postgres + Auth + RLS + Realtime) e Edge Functions (Deno) |
-| Integrações | Google Places API (New), Geocoding API, Brave Search API ou Google Programmable Search, Anthropic (Claude) |
+| Integrações | OpenStreetMap (gratuito), Google Places API (New) + Geocoding (opcional), Brave Search ou Google Programmable Search (opcional), Anthropic Claude (opcional) |
 | Exportação | CSV, Excel (SheetJS), PDF (jsPDF) |
 | PWA | vite-plugin-pwa (manifest, service worker, ícones, atalhos) |
 

@@ -5,6 +5,7 @@ import { requireUser } from "../_shared/auth.ts";
 import { limitsFor, type Provider } from "../_shared/usage.ts";
 import { webSearchProvider } from "../_shared/websearch.ts";
 import { AI_MODEL } from "../_shared/ai.ts";
+import { OSM_USER_AGENT } from "../_shared/osm.ts";
 
 type State = "connected" | "pending" | "auth_error" | "limit" | "error" | "configured";
 
@@ -49,6 +50,12 @@ async function testWebSearch(): Promise<{ state: State; message: string }> {
   return { state: r.status === 429 ? "limit" : r.status === 400 || r.status === 403 ? "auth_error" : "error", message: `HTTP ${r.status}` };
 }
 
+async function testOsm(): Promise<{ state: State; message: string }> {
+  const r = await fetch("https://nominatim.openstreetmap.org/search?q=Votuporanga&format=jsonv2&limit=1&countrycodes=br", { headers: { "User-Agent": OSM_USER_AGENT }, signal: AbortSignal.timeout(10000) });
+  if (r.ok) return { state: "connected", message: "OpenStreetMap (Nominatim/Overpass) respondeu com sucesso — gratuito, sem chave" };
+  return { state: r.status === 429 ? "limit" : "error", message: `HTTP ${r.status}` };
+}
+
 async function testAI(): Promise<{ state: State; message: string }> {
   if (!env("ANTHROPIC_API_KEY")) return { state: "pending", message: "Segredo ANTHROPIC_API_KEY não definido" };
   try {
@@ -88,14 +95,21 @@ Deno.serve(handler(async (req) => {
   };
   const base = (ok: boolean, missing: string) => ({ state: (ok ? "configured" : "pending") as State, message: ok ? "Segredo configurado (clique em Testar para validar)" : missing });
 
+  const hasGoogle = configured.google;
+  const pref = (env("SEARCH_PROVIDER") ?? "auto").toLowerCase();
+  const activeSource = pref === "osm" || (pref === "auto" && !hasGoogle) ? "osm" : "google";
+  const osm = test ? await testOsm().catch((e) => ({ state: "error" as State, message: String(e?.message ?? e) }))
+    : { state: "connected" as State, message: "Fonte gratuita, sem chave: Overpass API + Nominatim" };
   const [places, geocoding, web, ai] = test
     ? await Promise.all([testGoogle(), testGeocoding(), testWebSearch(), testAI()].map((p) => p.catch((e) => ({ state: "error" as State, message: String(e?.message ?? e) }))))
     : [base(configured.google, "Segredo GOOGLE_MAPS_API_KEY não definido"), base(configured.google, "Segredo GOOGLE_MAPS_API_KEY não definido"), base(configured.web, "Defina BRAVE_SEARCH_API_KEY ou GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX"), base(configured.ai, "Segredo ANTHROPIC_API_KEY não definido")];
 
   return json(req, {
     tested: test,
+    active_source: activeSource,
     integrations: {
-      google_places: { ...places, usage: agg("google_places") },
+      openstreetmap: { ...osm, active: activeSource === "osm", usage: agg("openstreetmap") },
+      google_places: { ...places, active: activeSource === "google", usage: agg("google_places") },
       google_geocoding: { ...geocoding, usage: agg("google_geocoding") },
       web_search: { ...web, provider: webSearchProvider(), usage: agg("web_search") },
       anthropic: { ...ai, model: AI_MODEL, usage: agg("anthropic") },

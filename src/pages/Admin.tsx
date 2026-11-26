@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ShieldCheck, UserPlus, Users, Activity, Gauge, Building2 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase, appUrl } from "../lib/supabase";
 import { callFunction, errorMessage } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, PageLoader } from "../components/ui";
@@ -37,7 +37,7 @@ export function AdminPage() {
 
   const act = async (body: any, msg: string) => {
     setBusy(true);
-    try { await callFunction("admin-members", { ...body, redirect_to: location.origin }); toast.success(msg); qc.invalidateQueries({ queryKey: ["admin"] }); }
+    try { await callFunction("admin-members", { ...body, redirect_to: appUrl() }); toast.success(msg); qc.invalidateQueries({ queryKey: ["admin"] }); }
     catch (e) { toast.error(errorMessage(e)); } finally { setBusy(false); }
   };
   const rename = async () => {

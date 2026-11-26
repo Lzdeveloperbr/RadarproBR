@@ -23,7 +23,7 @@ export function NewSearchPage() {
   const nav = useNavigate();
   const [f, setF] = useState({
     country: "Brasil", state: "", city: "", neighborhood: "", categories: [] as string[], custom: "",
-    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true,
+    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true, provider: "auto",
   });
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [useCenter, setUseCenter] = useState(false);
@@ -44,7 +44,7 @@ export function NewSearchPage() {
       const params = {
         country: f.country, state: f.state, city: f.city.trim(), neighborhood: f.neighborhood.trim(), categories: f.categories,
         custom_category: f.custom.trim(), radius_km: f.radius, max_results: f.max, digital_filter: f.filter, whole_city: f.wholeCity,
-        center: useCenter ? center : null,
+        center: useCenter ? center : null, provider: f.provider,
       };
       const cats = [...f.categories, f.custom.trim()].filter(Boolean);
       const name = `${cats.slice(0, 3).join(", ")}${cats.length > 3 ? ` +${cats.length - 3}` : ""} — ${f.city || "ponto no mapa"}${f.state ? "/" + f.state : ""}`;
@@ -60,7 +60,7 @@ export function NewSearchPage() {
 
   return (
     <>
-      <PageHeader title="Nova pesquisa" subtitle="Encontre estabelecimentos reais via Google Places e investigue a presença digital de cada um" icon={Radar} />
+      <PageHeader title="Nova pesquisa" subtitle="Encontre estabelecimentos reais (OpenStreetMap gratuito ou Google Places) e investigue a presença digital de cada um" icon={Radar} />
       <form onSubmit={submit} className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <div className="space-y-4">
           <Card>
@@ -80,6 +80,13 @@ export function NewSearchPage() {
               </Field>
               <Field label="7. Quantidade máxima de resultados" hint="Até 300 por pesquisa. Acima de 60 por categoria o sistema divide a área em grade (mais chamadas à API).">
                 <input type="number" min={1} max={300} className="input" value={f.max} onChange={(e) => setF({ ...f, max: Math.max(1, Math.min(300, Number(e.target.value) || 1)) })} />
+              </Field>
+              <Field label="Fonte de dados" hint="OpenStreetMap é gratuito e não exige chave. O Google Places costuma ter mais estabelecimentos e avaliações, mas exige chave.">
+                <select className="input" value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })}>
+                  <option value="auto">Automático (Google se configurado, senão OpenStreetMap)</option>
+                  <option value="osm">OpenStreetMap — gratuito</option>
+                  <option value="google">Google Places</option>
+                </select>
               </Field>
               <div className="sm:col-span-2 flex flex-wrap gap-5 pt-1">
                 <Toggle checked={f.wholeCity} onChange={(v) => setF({ ...f, wholeCity: v })} label="Pesquisar a cidade inteira (ajusta o raio à área do município)" />
@@ -127,10 +134,10 @@ export function NewSearchPage() {
           </Card>
           <Card className="p-4 text-xs text-ink-300 space-y-2">
             <div className="flex items-center gap-2 text-white font-medium text-sm"><Info className="size-4 text-lime-400" />Como funciona</div>
-            <p>1. A pesquisa consulta a Google Places API pelo backend (sua chave nunca é exposta).</p>
-            <p>2. Cada estabelecimento é salvo sem duplicação (ID do Google + nome/telefone).</p>
+            <p>1. A pesquisa consulta o OpenStreetMap (gratuito) ou a Google Places API pelo backend — nenhuma chave é exposta.</p>
+            <p>2. Cada estabelecimento é salvo sem duplicação (ID da fonte + nome/telefone/coordenadas).</p>
             <p>3. A análise verifica o site informado, pesquisa na web quando configurada, lê o conteúdo público respeitando o robots.txt e calcula a pontuação de oportunidade.</p>
-            <p>Nenhum resultado é simulado. Sem a chave configurada, a pesquisa informa o que falta.</p>
+            <p>Nenhum resultado é simulado. No OpenStreetMap, comércios sem cadastro no mapa colaborativo não aparecem.</p>
           </Card>
           <Button type="submit" size="lg" loading={loading} icon={Radar} className="w-full">Iniciar pesquisa</Button>
         </div>

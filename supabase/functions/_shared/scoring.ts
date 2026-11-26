@@ -17,6 +17,7 @@ export interface ScoringInput {
   hasPhone: boolean;
   rating?: number | null;
   ratingCount?: number | null;
+  sourceName?: string;
 }
 
 export interface ScoringResult {
@@ -56,8 +57,8 @@ export function computeOpportunity(input: ScoringInput): ScoringResult {
       reasons.push({
         kind: "fact",
         text: input.webSearchUsed
-          ? "Site próprio não identificado no Google Places nem na busca na web"
-          : "Site próprio não identificado no Google Places (busca na web não configurada)",
+          ? `Site próprio não identificado no ${input.sourceName ?? "Google Places"} nem na busca na web`
+          : `Site próprio não identificado no ${input.sourceName ?? "Google Places"} (busca na web não configurada)`,
         weight: 45,
       });
     } else {

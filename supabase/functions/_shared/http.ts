@@ -1,6 +1,6 @@
 // Utilitários HTTP das Edge Functions: CORS, respostas JSON e erros tipados.
 
-const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "*").split(",").map((s) => s.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = (env("ALLOWED_ORIGINS") ?? "*").split(",").map((s) => s.trim()).filter(Boolean);
 
 export function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
@@ -50,6 +50,8 @@ export async function readJson<T = Record<string, unknown>>(req: Request, maxByt
 }
 
 export function env(name: string): string | undefined {
-  const v = Deno.env.get(name);
+  // Compatível com Deno (Edge Functions) e Node (testes)
+  const g = globalThis as { Deno?: { env: { get(k: string): string | undefined } }; process?: { env: Record<string, string | undefined> } };
+  const v = g.Deno ? g.Deno.env.get(name) : g.process?.env[name];
   return v && v.trim() ? v.trim() : undefined;
 }
