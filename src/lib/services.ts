@@ -2,10 +2,12 @@
 // classificação de oportunidades, monitoramento de sites e indicadores.
 import { db, uid, nowIso, logActivity, recordUsage, ensureLead, getSettings } from "./db";
 import type { Audit, Business, Check, Contact, Search, SearchResult, Source, Website } from "./types";
-import { nominatimGeocode, overpassSearch, buildOverpassQuery, parseOsmElement, formatAddress, describeOpeningHours } from "./engine/osm";
+import { nominatimGeocode, overpassSearch, buildOverpassQuery, parseOsmElement, formatAddress, describeOpeningHours, type OsmPlace } from "./engine/osm";
+import { googleTextSearch, gridCells, type GooglePlace } from "./engine/google";
+import { CATEGORY_QUERIES } from "./engine/categories";
 import { classifyUrl, normalizeUrl, hostnameOf } from "./engine/classify";
 import { computeOpportunity } from "./engine/scoring";
-import { dedupeKey, haversineKm } from "./engine/normalize";
+import { dedupeKey, haversineKm, normalizeName, onlyDigits } from "./engine/normalize";
 import { LEAD_STATUS } from "./constants";
 
 export interface SearchParams {
@@ -21,11 +23,94 @@ export interface SearchParams {
   whole_city?: boolean;
   center?: { lat: number; lng: number } | null;
   batch_job_id?: string | null;
+  source?: SearchSource;
 }
 
 const clean = (s: unknown, max = 120) => (typeof s === "string" ? s.trim().slice(0, max) : "");
 
-/** Pesquisa real de estabelecimentos no OpenStreetMap, com deduplicação e criação de leads. */
+export type SearchSource = "auto" | "both" | "google" | "osm";
+
+export function googleKey(settingsKey?: string | null): string | null {
+  return (settingsKey && settingsKey.trim()) || (import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY as string | undefined) || null;
+}
+
+type Candidate = {
+  b: Omit<Business, "id" | "created_at" | "updated_at">;
+  category: string;
+  distance: number;
+  contacts: Omit<Contact, "id" | "business_id">[];
+  norm: string;
+};
+
+const nameNorm = (n: string) => normalizeName(n).replace(/\b(barbearia|restaurante|pizzaria|lanchonete|padaria|clinica|salao|loja|bar|cafe|studio|oficina|academia|pet shop|farmacia|de|da|do|e)\b/g, "").replace(/\s+/g, " ").trim();
+
+/** Mesmo estabelecimento em fontes diferentes: telefone igual, ou nome parecido a menos de 150 m. */
+export function sameBusiness(a: { norm: string; lat: number | null; lng: number | null; phone: string | null }, b: { norm: string; lat: number | null; lng: number | null; phone: string | null }) {
+  const pa = onlyDigits(a.phone ?? "").slice(-8), pb = onlyDigits(b.phone ?? "").slice(-8);
+  if (pa.length === 8 && pa === pb) return true;
+  if (a.lat == null || b.lat == null || a.lng == null || b.lng == null) return false;
+  if (haversineKm(a.lat, a.lng, b.lat, b.lng) > 0.15) return false;
+  if (!a.norm || !b.norm) return false;
+  return a.norm === b.norm || a.norm.includes(b.norm) || b.norm.includes(a.norm);
+}
+
+/** Completa campos vazios de `base` com os de `extra` (sem sobrescrever dados existentes). */
+function fillMissing<T extends Record<string, any>>(base: T, extra: Partial<T>): T {
+  const out: any = { ...base };
+  for (const [k, v] of Object.entries(extra)) if ((out[k] == null || out[k] === "") && v != null && v !== "") out[k] = v;
+  return out;
+}
+
+function fromGoogle(g: GooglePlace, category: string, distance: number): Candidate {
+  const site = g.website ? normalizeUrl(g.website) : null;
+  const kind = classifyUrl(site);
+  const contacts: Candidate["contacts"] = [];
+  if (g.phone) contacts.push({ type: "phone", value: g.phone, url: `tel:${(g.intl_phone ?? g.phone).replace(/[^\d+]/g, "")}`, source: "google" });
+  if (site && kind === "social") contacts.push({ type: /instagram/i.test(site) ? "instagram" : /facebook|fb\./i.test(site) ? "facebook" : "other", value: site, url: site, source: "google" });
+  return {
+    category, distance, contacts, norm: nameNorm(g.name),
+    b: {
+      place_id: g.id, dedupe_key: dedupeKey(g.name, g.phone, g.lat, g.lng), name: g.name, category, primary_type: g.primary_type, primary_type_label: g.primary_type_label,
+      types: g.types, formatted_address: g.address, street: g.street, street_number: g.number, neighborhood: g.neighborhood, city: g.city, state: g.state,
+      postal_code: g.postal_code, country: "Brasil", lat: g.lat, lng: g.lng, phone: g.phone, international_phone: g.intl_phone, google_maps_uri: g.maps_uri, osm_url: null,
+      places_website_uri: site, rating: g.rating, user_rating_count: g.rating_count, business_status: g.status, opening_hours: g.hours ? { weekdayDescriptions: g.hours } : null,
+      source: "google", digital_status: kind === "own_site" ? "site_pending" : "unknown", primary_website: kind === "own_site" ? site : null, has_own_site: null, site_online: null,
+      site_https: null, site_has_location: null, site_mobile_ready: null, has_whatsapp: null, has_instagram: contacts.some((c) => c.type === "instagram") || null,
+      has_facebook: contacts.some((c) => c.type === "facebook") || null, has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
+    },
+  };
+}
+
+function fromOsm(pl: OsmPlace, category: string, distance: number, city: string, state: string): Candidate {
+  const site = pl.website ? normalizeUrl(pl.website) : null;
+  const kind = classifyUrl(site);
+  const contacts: Candidate["contacts"] = [];
+  if (pl.phone) contacts.push({ type: "phone", value: pl.phone, url: `tel:${pl.phone.replace(/[^\d+]/g, "")}`, source: "openstreetmap" });
+  if (pl.whatsapp) { const d = pl.whatsapp.replace(/\D/g, ""); contacts.push({ type: "whatsapp", value: d || pl.whatsapp, url: d.length >= 10 ? `https://wa.me/${d.length <= 11 ? "55" + d : d}` : null, source: "openstreetmap" }); }
+  if (pl.instagram) contacts.push({ type: "instagram", value: pl.instagram, url: pl.instagram, source: "openstreetmap" });
+  if (pl.facebook) contacts.push({ type: "facebook", value: pl.facebook, url: pl.facebook, source: "openstreetmap" });
+  if (pl.email) contacts.push({ type: "email", value: pl.email, url: `mailto:${pl.email}`, source: "openstreetmap" });
+  if (site && kind === "social") contacts.push({ type: /instagram/i.test(site) ? "instagram" : /facebook|fb\./i.test(site) ? "facebook" : "other", value: site, url: site, source: "openstreetmap" });
+  const weekday = describeOpeningHours(pl.opening_hours);
+  return {
+    category, distance, contacts, norm: nameNorm(pl.name),
+    b: {
+      place_id: pl.id, dedupe_key: dedupeKey(pl.name, pl.phone, pl.lat, pl.lng), name: pl.name, category, primary_type: pl.primary_type, primary_type_label: pl.primary_type,
+      types: Object.entries(pl.tags).filter(([k]) => ["shop", "amenity", "office", "craft", "tourism", "leisure", "healthcare", "cuisine"].includes(k)).map(([k, v]) => `${k}:${v}`),
+      formatted_address: formatAddress(pl, city || null, state || null), street: pl.street, street_number: pl.number, neighborhood: pl.neighborhood,
+      city: pl.city ?? (city || null), state: pl.state ?? (state || null), postal_code: pl.postal_code, country: "Brasil", lat: pl.lat, lng: pl.lng,
+      phone: pl.phone, international_phone: pl.phone, google_maps_uri: `https://www.google.com/maps/search/?api=1&query=${pl.lat},${pl.lng}`, osm_url: pl.osm_url,
+      places_website_uri: site, rating: null, user_rating_count: null, business_status: pl.tags.disused || pl.tags.abandoned ? "CLOSED" : "OPERATIONAL",
+      opening_hours: weekday ? { weekdayDescriptions: weekday, osm: pl.opening_hours ?? undefined } : null, source: "openstreetmap",
+      digital_status: kind === "own_site" ? "site_pending" : "unknown", primary_website: kind === "own_site" ? site : null, has_own_site: null, site_online: null,
+      site_https: null, site_has_location: null, site_mobile_ready: null, has_whatsapp: contacts.some((c) => c.type === "whatsapp") || null,
+      has_instagram: contacts.some((c) => c.type === "instagram") || null, has_facebook: contacts.some((c) => c.type === "facebook") || null,
+      has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
+    },
+  };
+}
+
+/** Pesquisa real de estabelecimentos (Google Places + OpenStreetMap), com fusão de fontes, deduplicação e criação de leads. */
 export async function searchPlaces(p: SearchParams) {
   const city = clean(p.city);
   const state = clean(p.state, 40);
@@ -38,6 +123,12 @@ export async function searchPlaces(p: SearchParams) {
   if (!categories.length) throw new Error("Selecione ao menos uma categoria");
   const maxResults = Math.max(1, Math.min(300, Math.round(Number(p.max_results) || 60)));
   let radiusKm = Math.max(0.5, Math.min(50, Number(p.radius_km) || 10));
+  const settings = await getSettings();
+  const key = googleKey(settings.google_api_key);
+  const source: SearchSource = p.source ?? settings.search_source ?? "auto";
+  const useGoogle = !!key && source !== "osm";
+  const useOsm = source !== "google" || !key;
+  if (source === "google" && !key) throw new Error("Fonte Google selecionada, mas nenhuma chave do Google está configurada (Configurações → Fontes de dados).");
 
   const search: Search = {
     id: uid(), country, city: city || "Ponto no mapa", state: state || null, neighborhood: neighborhood || null, categories, custom_category: custom || null,
@@ -46,6 +137,7 @@ export async function searchPlaces(p: SearchParams) {
   };
   await db.searches.add(search);
   let calls = 0;
+  const warnings: string[] = [];
   try {
     let center = p.center && Number.isFinite(p.center.lat) ? p.center : null;
     if (!center) {
@@ -53,84 +145,93 @@ export async function searchPlaces(p: SearchParams) {
       const g = await nominatimGeocode(address);
       calls++;
       await recordUsage("openstreetmap", "nominatim", !!g);
-      if (!g) throw new Error(`Localidade não encontrada no OpenStreetMap: ${address}`);
+      if (!g) throw new Error(`Localidade não encontrada: ${address}`);
       center = { lat: g.lat, lng: g.lng };
       if (p.whole_city && g.radiusKm) radiusKm = Math.min(50, Math.max(radiusKm, Math.ceil(g.radiusKm)));
     }
     await db.searches.update(search.id, { center_lat: center.lat, center_lng: center.lng, radius_km: radiusKm });
 
     const perCategory = Math.ceil(maxResults / categories.length);
-    const found = new Map<string, { b: Omit<Business, "id" | "created_at" | "updated_at">; category: string; distance: number; contacts: Omit<Contact, "id" | "business_id">[] }>();
+    const candidates: Candidate[] = [];
     for (const category of categories) {
-      const q = buildOverpassQuery(category, center.lat, center.lng, radiusKm * 1000, Math.min(1000, perCategory * 3));
-      let elements;
-      try {
-        elements = await overpassSearch(q);
-        calls++;
-        await recordUsage("openstreetmap", "overpass");
-      } catch (e) {
-        await recordUsage("openstreetmap", "overpass", false);
-        throw e;
+      const list: Candidate[] = [];
+      if (useGoogle) {
+        // Grade de células: o Google devolve no máximo 20 por consulta
+        const n = Math.max(1, Math.min(settings.google_max_grid ?? 3, Math.ceil(Math.sqrt(perCategory / 12))));
+        const term = CATEGORY_QUERIES[category] ?? category;
+        try {
+          for (const cell of gridCells(center.lat, center.lng, radiusKm, n)) {
+            const res = await googleTextSearch(key!, `${term}${city ? ` em ${[neighborhood, city, state].filter(Boolean).join(", ")}` : ""}`, cell);
+            calls++;
+            await recordUsage("google", "searchByText");
+            for (const g of res) {
+              const d = haversineKm(center.lat, center.lng, g.lat, g.lng);
+              if (d <= radiusKm * 1.05 && g.status !== "CLOSED_PERMANENTLY") list.push(fromGoogle(g, category, d));
+            }
+          }
+        } catch (e) {
+          await recordUsage("google", "searchByText", false);
+          if (!useOsm && source === "google") throw e;
+          warnings.push((e as Error).message);
+        }
       }
-      const parsed = elements.map(parseOsmElement).filter((x): x is NonNullable<typeof x> => !!x)
-        .map((pl) => ({ pl, distance: haversineKm(center!.lat, center!.lng, pl.lat, pl.lng) }))
-        .filter((x) => x.distance <= radiusKm * 1.05)
-        .sort((a, b) => a.distance - b.distance);
-      let count = 0;
-      for (const { pl, distance } of parsed) {
-        if (found.has(pl.id)) continue;
-        const site = pl.website ? normalizeUrl(pl.website) : null;
-        const kind = classifyUrl(site);
-        const contacts: Omit<Contact, "id" | "business_id">[] = [];
-        if (pl.phone) contacts.push({ type: "phone", value: pl.phone, url: `tel:${pl.phone.replace(/[^\d+]/g, "")}`, source: "openstreetmap" });
-        if (pl.whatsapp) { const d = pl.whatsapp.replace(/\D/g, ""); contacts.push({ type: "whatsapp", value: d || pl.whatsapp, url: d.length >= 10 ? `https://wa.me/${d.length <= 11 ? "55" + d : d}` : null, source: "openstreetmap" }); }
-        if (pl.instagram) contacts.push({ type: "instagram", value: pl.instagram, url: pl.instagram, source: "openstreetmap" });
-        if (pl.facebook) contacts.push({ type: "facebook", value: pl.facebook, url: pl.facebook, source: "openstreetmap" });
-        if (pl.email) contacts.push({ type: "email", value: pl.email, url: `mailto:${pl.email}`, source: "openstreetmap" });
-        if (site && kind === "social") contacts.push({ type: /instagram/i.test(site) ? "instagram" : /facebook|fb\./i.test(site) ? "facebook" : "other", value: site, url: site, source: "openstreetmap" });
-        const weekday = describeOpeningHours(pl.opening_hours);
-        found.set(pl.id, {
-          category, distance, contacts,
-          b: {
-            place_id: pl.id, dedupe_key: dedupeKey(pl.name, pl.phone, pl.lat, pl.lng), name: pl.name, category, primary_type: pl.primary_type, primary_type_label: pl.primary_type,
-            types: Object.entries(pl.tags).filter(([k]) => ["shop", "amenity", "office", "craft", "tourism", "leisure", "healthcare", "cuisine"].includes(k)).map(([k, v]) => `${k}:${v}`),
-            formatted_address: formatAddress(pl, city || null, state || null), street: pl.street, street_number: pl.number, neighborhood: pl.neighborhood,
-            city: pl.city ?? (city || null), state: pl.state ?? (state || null), postal_code: pl.postal_code, country: "Brasil", lat: pl.lat, lng: pl.lng,
-            phone: pl.phone, international_phone: pl.phone, google_maps_uri: `https://www.google.com/maps/search/?api=1&query=${pl.lat},${pl.lng}`, osm_url: pl.osm_url,
-            places_website_uri: site, rating: null, user_rating_count: null, business_status: pl.tags.disused || pl.tags.abandoned ? "CLOSED" : "OPERATIONAL",
-            opening_hours: weekday ? { weekdayDescriptions: weekday, osm: pl.opening_hours ?? undefined } : null, source: "openstreetmap",
-            digital_status: kind === "own_site" ? "site_pending" : "unknown", primary_website: kind === "own_site" ? site : null, has_own_site: null, site_online: null,
-            site_https: null, site_has_location: null, site_mobile_ready: null, has_whatsapp: contacts.some((c) => c.type === "whatsapp") || null,
-            has_instagram: contacts.some((c) => c.type === "instagram") || null, has_facebook: contacts.some((c) => c.type === "facebook") || null,
-            has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
-          },
-        });
-        if (++count >= perCategory) break;
+      if (useOsm || (useGoogle && warnings.length)) {
+        const q = buildOverpassQuery(category, center.lat, center.lng, radiusKm * 1000, Math.min(1000, perCategory * 3));
+        try {
+          const elements = await overpassSearch(q);
+          calls++;
+          await recordUsage("openstreetmap", "overpass");
+          for (const pl of elements.map(parseOsmElement)) {
+            if (!pl) continue;
+            const d = haversineKm(center.lat, center.lng, pl.lat, pl.lng);
+            if (d <= radiusKm * 1.05) list.push(fromOsm(pl, category, d, city, state));
+          }
+        } catch (e) {
+          await recordUsage("openstreetmap", "overpass", false);
+          if (!useGoogle || !list.length) throw e; // com resultados do Google, segue sem o OSM
+          warnings.push((e as Error).message);
+        }
       }
-      if (categories.length > 1) await new Promise((r) => setTimeout(r, 1000)); // gentileza com o servidor público
+      // Fusão entre fontes (Google tem prioridade; OSM completa site/redes/WhatsApp)
+      const merged: Candidate[] = [];
+      for (const c of list.sort((a, b) => (a.b.source === "google" ? 0 : 1) - (b.b.source === "google" ? 0 : 1) || a.distance - b.distance)) {
+        const twin = merged.find((m) => m.b.place_id === c.b.place_id || sameBusiness({ ...m.b, norm: m.norm }, { ...c.b, norm: c.norm }));
+        if (twin) {
+          twin.b = fillMissing(twin.b, { ...c.b, place_id: undefined, source: undefined, dedupe_key: undefined } as any);
+          if (c.b.osm_url) twin.b.osm_url = twin.b.osm_url ?? c.b.osm_url;
+          for (const ct of c.contacts) if (!twin.contacts.some((x) => x.type === ct.type && x.value === ct.value)) twin.contacts.push(ct);
+        } else merged.push(c);
+      }
+      candidates.push(...merged.sort((a, b) => a.distance - b.distance).slice(0, perCategory));
+      if (categories.length > 1) await new Promise((r) => setTimeout(r, 800));
     }
 
-    // Persistência com deduplicação (ID do OSM + nome/telefone/coordenada)
+    // Persistência com deduplicação contra a base existente (ID da fonte, chave ou nome parecido próximo)
+    const existingAll = (await db.businesses.toArray()).map((x) => ({ x, norm: nameNorm(x.name) }));
     const results: SearchResult[] = [];
     let totalNew = 0;
     await db.transaction("rw", [db.businesses, db.search_results, db.websites, db.contacts, db.leads], async () => {
-      for (const f of found.values()) {
-        const existing = (await db.businesses.where("place_id").equals(f.b.place_id!).first()) ?? (await db.businesses.where("dedupe_key").equals(f.b.dedupe_key).first());
+      for (const f of candidates) {
+        const hit = existingAll.find((e) => e.x.place_id === f.b.place_id || e.x.dedupe_key === f.b.dedupe_key || sameBusiness({ ...e.x, norm: e.norm }, { ...f.b, norm: f.norm }));
         let id: string;
-        if (existing) {
-          id = existing.id;
-          // Atualiza dados públicos preservando as análises já feitas
-          const { digital_status: _d, primary_website: _p, has_whatsapp: _w, has_instagram: _i, has_facebook: _f, opportunity_level: _l, opportunity_score: _s, analyzed_at: _a,
-            has_own_site: _o, site_online: _so, site_https: _sh, site_has_location: _sl, site_mobile_ready: _sm, has_booking: _hb, has_menu: _hm, ...pub } = f.b;
-          await db.businesses.update(id, { ...pub, updated_at: nowIso() });
+        if (hit) {
+          id = hit.x.id;
+          const pub = { name: f.b.name, formatted_address: f.b.formatted_address, phone: f.b.phone, rating: f.b.rating, user_rating_count: f.b.user_rating_count, opening_hours: f.b.opening_hours, business_status: f.b.business_status };
+          const upd = fillMissing(hit.x as any, { ...f.b, place_id: undefined, dedupe_key: undefined } as any);
+          // Dados públicos do Google substituem os antigos (são os mais atualizados)
+          if (f.b.source === "google") Object.assign(upd, Object.fromEntries(Object.entries(pub).filter(([, v]) => v != null)));
+          await db.businesses.put({ ...upd, id, updated_at: nowIso() });
+          hit.x = { ...upd, id };
         } else {
           id = uid();
-          await db.businesses.add({ ...f.b, id, created_at: nowIso(), updated_at: nowIso() });
+          const row = { ...f.b, id, created_at: nowIso(), updated_at: nowIso() } as Business;
+          await db.businesses.add(row);
+          existingAll.push({ x: row, norm: f.norm });
           totalNew++;
           await ensureLead(id, "nao_analisado");
         }
         if (!(await db.search_results.where("[search_id+business_id]").equals([search.id, id]).first())) {
-          const r: SearchResult = { id: uid(), search_id: search.id, business_id: id, category: f.category, was_new: !existing, distance_km: Math.round(f.distance * 100) / 100, created_at: nowIso() };
+          const r: SearchResult = { id: uid(), search_id: search.id, business_id: id, category: f.category, was_new: !hit, distance_km: Math.round(f.distance * 100) / 100, created_at: nowIso() };
           await db.search_results.add(r);
           results.push(r);
         }
@@ -139,14 +240,15 @@ export async function searchPlaces(p: SearchParams) {
         }
         if (f.b.places_website_uri && !(await db.websites.where("[business_id+url]").equals([id, f.b.places_website_uri]).first())) {
           const kind = classifyUrl(f.b.places_website_uri);
-          await db.websites.add({ id: uid(), business_id: id, url: f.b.places_website_uri, final_url: null, domain: hostnameOf(f.b.places_website_uri), kind, source: "openstreetmap",
-            verified: true, verification_note: "Informado no cadastro do OpenStreetMap", is_primary: kind === "own_site", is_online: null, https: null, last_checked_at: null, error: null });
+          await db.websites.add({ id: uid(), business_id: id, url: f.b.places_website_uri, final_url: null, domain: hostnameOf(f.b.places_website_uri), kind, source: f.b.source,
+            verified: true, verification_note: f.b.source === "google" ? "Informado no perfil do Google" : "Informado no cadastro do OpenStreetMap",
+            is_primary: kind === "own_site" && !(await db.websites.where("business_id").equals(id).filter((w) => w.is_primary).count()), is_online: null, https: null, last_checked_at: null, error: null });
         }
       }
     });
-    await db.searches.update(search.id, { status: "completed", total_found: results.length, total_new: totalNew, api_calls: calls, completed_at: nowIso() });
-    await logActivity("search.completed", { type: "search", id: search.id }, { city, categories, found: results.length, new: totalNew });
-    return { search: { ...search, total_found: results.length }, business_ids: results.map((r) => r.business_id), found: results.length, new: totalNew };
+    await db.searches.update(search.id, { status: "completed", total_found: results.length, total_new: totalNew, api_calls: calls, completed_at: nowIso(), error: warnings.length ? warnings[0] : null });
+    await logActivity("search.completed", { type: "search", id: search.id }, { city, categories, found: results.length, new: totalNew, sources: [useGoogle && "google", useOsm && "osm"].filter(Boolean) });
+    return { search: { ...search, total_found: results.length }, business_ids: results.map((r) => r.business_id), found: results.length, new: totalNew, warnings };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.searches.update(search.id, { status: "failed", error: msg.slice(0, 500), api_calls: calls, completed_at: nowIso() });
@@ -196,8 +298,8 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
   const biz = await db.businesses.get(businessId);
   if (!biz) throw new Error("Estabelecimento não encontrado");
   const settings = await getSettings();
-  const sourceName = biz.source === "openstreetmap" ? "OpenStreetMap" : "Cadastro manual";
-  const sources: Source[] = [{ name: sourceName, url: biz.osm_url ?? undefined, type: "places", result: biz.places_website_uri ? `Site informado: ${biz.places_website_uri}` : "Nenhum site informado no cadastro", at: biz.updated_at }];
+  const sourceName = biz.source === "google" ? "Google" : biz.source === "openstreetmap" ? "OpenStreetMap" : "Cadastro manual";
+  const sources: Source[] = [{ name: sourceName, url: (biz.source === "google" ? biz.google_maps_uri : biz.osm_url) ?? undefined, type: "places", result: biz.places_website_uri ? `Site informado: ${biz.places_website_uri}` : "Nenhum site informado no cadastro", at: biz.updated_at }];
   const websites = await db.websites.where("business_id").equals(businessId).toArray();
   let own = websites.find((w) => w.kind === "own_site" && w.is_primary) ?? websites.find((w) => w.kind === "own_site");
   const previous = (await db.audits.where("business_id").equals(businessId).sortBy("created_at")).pop();

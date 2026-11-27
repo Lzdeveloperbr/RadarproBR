@@ -11,6 +11,7 @@ const ROWS: [string, (b: Business) => React.ReactNode][] = [
   ["Categoria", (b) => b.category],
   ["Cidade", (b) => [b.neighborhood, b.city].filter(Boolean).join(", ")],
   ["Presença digital", (b) => <DigitalStatusBadge status={b.digital_status} />],
+  ["Avaliação", (b) => (b.rating != null ? `${b.rating}★ (${b.user_rating_count})` : null)],
   ["Horário publicado", (b) => !!b.opening_hours],
   ["Telefone", (b) => b.phone],
   ["Site próprio", (b) => b.has_own_site],

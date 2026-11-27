@@ -32,6 +32,8 @@ export const FILTER_TOGGLES: { key: keyof BusinessFilters; label: string }[] = [
   { key: "noLocation", label: "Sites sem localização" },
   { key: "noWhatsapp", label: "Sem WhatsApp identificado" },
   { key: "noInstagram", label: "Sem Instagram identificado" },
+  { key: "ratingAbove4", label: "Avaliação acima de 4★" },
+  { key: "reviewsOver50", label: "Mais de 50 avaliações" },
   { key: "notAnalyzed", label: "Ainda não analisados" },
 ];
 

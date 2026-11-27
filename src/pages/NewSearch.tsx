@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Radar, MapPin, Sparkles, Crosshair, Info } from "lucide-react";
 import { useSettings } from "../hooks/useSettings";
+import { googleKey } from "../lib/services";
 import { useBatchRunner } from "../hooks/useBatchRunner";
 import { Button, Card, CardHeader, Field, PageHeader, Toggle } from "../components/ui";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -22,16 +23,17 @@ export function NewSearchPage() {
   const nav = useNavigate();
   const [f, setF] = useState({
     country: "Brasil", state: "", city: "", neighborhood: "", categories: [] as string[], custom: "",
-    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true
+    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true, source: "auto" as "auto" | "google" | "osm",
   });
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [useCenter, setUseCenter] = useState(false);
   const [loading, setLoading] = useState(false);
+  const hasGoogle = !!googleKey(settings.google_api_key);
 
   useEffect(() => {
     if (!settings) return;
     setF((p) => ({ ...p, country: settings.default_country ?? "Brasil", state: settings.default_state ?? "", city: settings.default_city ?? "",
-      radius: settings.default_radius_km ?? 10, max: settings.default_max_results ?? 60, autoAudit: settings.auto_audit ?? true }));
+      radius: settings.default_radius_km ?? 10, max: settings.default_max_results ?? 60, autoAudit: settings.auto_audit ?? true, source: settings.search_source === "both" ? "auto" : settings.search_source }));
   }, [settings]);
 
   const submit = async (e: FormEvent) => {
@@ -43,7 +45,7 @@ export function NewSearchPage() {
       const params = {
         country: f.country, state: f.state, city: f.city.trim(), neighborhood: f.neighborhood.trim(), categories: f.categories,
         custom_category: f.custom.trim(), radius_km: f.radius, max_results: f.max, digital_filter: f.filter, whole_city: f.wholeCity,
-        center: useCenter ? center : null,
+        center: useCenter ? center : null, source: f.source,
       };
       const cats = [...f.categories, f.custom.trim()].filter(Boolean);
       const name = `${cats.slice(0, 3).join(", ")}${cats.length > 3 ? ` +${cats.length - 3}` : ""} — ${f.city || "ponto no mapa"}${f.state ? "/" + f.state : ""}`;
@@ -65,7 +67,7 @@ export function NewSearchPage() {
 
   return (
     <>
-      <PageHeader title="Nova pesquisa" subtitle="Encontre estabelecimentos reais no OpenStreetMap (gratuito) e investigue a presença digital de cada um" icon={Radar} />
+      <PageHeader title="Nova pesquisa" subtitle="Encontre estabelecimentos reais (Google Places + OpenStreetMap) e investigue a presença digital de cada um" icon={Radar} />
       <form onSubmit={submit} className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <div className="space-y-4">
           <Card>
@@ -85,6 +87,13 @@ export function NewSearchPage() {
               </Field>
               <Field label="7. Quantidade máxima de resultados" hint="Até 300 por pesquisa, divididos entre as categorias.">
                 <input type="number" min={1} max={300} className="input" value={f.max} onChange={(e) => setF({ ...f, max: Math.max(1, Math.min(300, Number(e.target.value) || 1)) })} />
+              </Field>
+              <Field label="Fonte de dados" hint={hasGoogle ? "Google + OpenStreetMap juntos encontram o máximo de estabelecimentos, com notas e avaliações." : "Sem chave do Google: usando OpenStreetMap (gratuito). Configure o Google em Configurações para achar muito mais."}>
+                <select className="input" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value as typeof f.source })}>
+                  <option value="auto">{hasGoogle ? "Google + OpenStreetMap (máximo)" : "OpenStreetMap (gratuito)"}</option>
+                  {hasGoogle && <option value="google">Somente Google Places</option>}
+                  <option value="osm">Somente OpenStreetMap</option>
+                </select>
               </Field>
               <div className="sm:col-span-2 flex flex-wrap gap-5 pt-1">
                 <Toggle checked={f.wholeCity} onChange={(v) => setF({ ...f, wholeCity: v })} label="Pesquisar a cidade inteira (ajusta o raio à área do município)" />
@@ -132,10 +141,10 @@ export function NewSearchPage() {
           </Card>
           <Card className="p-4 text-xs text-ink-300 space-y-2">
             <div className="flex items-center gap-2 text-white font-medium text-sm"><Info className="size-4 text-lime-400" />Como funciona</div>
-            <p>1. A pesquisa consulta o OpenStreetMap, um mapa colaborativo gratuito, direto do seu navegador.</p>
+            <p>1. A pesquisa consulta o Google Places (se configurado) e o OpenStreetMap, e junta os resultados sem duplicar.</p>
             <p>2. Cada estabelecimento é salvo sem duplicação (ID da fonte + nome/telefone/coordenadas).</p>
             <p>3. A análise classifica a presença digital (site próprio x redes sociais), testa se o site responde com HTTPS e calcula a pontuação. Você completa o checklist do conteúdo do site na ficha.</p>
-            <p>Nenhum resultado é simulado. Comércios que ainda não estão cadastrados no OpenStreetMap não aparecem.</p>
+            <p>Nenhum resultado é simulado.</p>
           </Card>
           <Button type="submit" size="lg" loading={loading} icon={Radar} className="w-full">Iniciar pesquisa</Button>
         </div>

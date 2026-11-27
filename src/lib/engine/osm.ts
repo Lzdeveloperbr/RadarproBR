@@ -11,7 +11,8 @@ export class SourceError extends Error {
 }
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
-const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+// Servidores públicos com CORS; o primeiro que responder é usado.
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 
 // Mapeamento das categorias do RADAR para tags do OpenStreetMap (filtros Overpass QL).
 export const OSM_CATEGORY_FILTERS: Record<string, string[]> = {
@@ -95,10 +96,22 @@ export function filtersFor(category: string): string[] {
   return term ? [`["name"~"${term}",i]["shop"]`, `["name"~"${term}",i]["amenity"]`, `["name"~"${term}",i]["office"]`, `["name"~"${term}",i]["craft"]`] : [];
 }
 
+/** Caixa delimitadora (sul, oeste, norte, leste) que contém o círculo de busca. */
+export function bboxAround(lat: number, lng: number, radiusM: number): [number, number, number, number] {
+  const dLat = radiusM / 111_320;
+  const dLng = radiusM / (111_320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  return [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
+}
+
+/**
+ * Consulta Overpass por caixa delimitadora (bem mais leve para o servidor que "around");
+ * o recorte exato pelo raio é feito depois, no navegador.
+ */
 export function buildOverpassQuery(category: string, lat: number, lng: number, radiusM: number, limit: number): string {
-  const r = Math.round(Math.min(50000, Math.max(100, radiusM)));
-  const parts = filtersFor(category).map((f) => `nwr${f}["name"](around:${r},${lat.toFixed(6)},${lng.toFixed(6)});`).join("\n  ");
-  return `[out:json][timeout:25];\n(\n  ${parts}\n);\nout center tags ${Math.max(1, Math.min(1000, limit))};`;
+  const r = Math.min(50000, Math.max(100, radiusM));
+  const [s, w, n, e] = bboxAround(lat, lng, r).map((v) => v.toFixed(5));
+  const parts = filtersFor(category).map((f) => `nwr${f}["name"];`).join("\n  ");
+  return `[out:json][timeout:25][bbox:${s},${w},${n},${e}];\n(\n  ${parts}\n);\nout center tags ${Math.max(1, Math.min(1000, limit))};`;
 }
 
 const clean = (v?: string) => (v && v.trim() ? v.trim() : null);
@@ -212,9 +225,9 @@ export async function overpassSearch(query: string): Promise<OsmElement[]> {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(query),
-        signal: AbortSignal.timeout(35_000),
+        signal: AbortSignal.timeout(30_000),
       });
-      if (res.status === 429 || res.status === 504) { lastErr = `HTTP ${res.status} (servidor ocupado)`; continue; }
+      if (res.status === 429 || res.status === 504) { lastErr = `HTTP ${res.status} (servidor ocupado)`; await new Promise((r) => setTimeout(r, 2000)); continue; }
       if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }
       const data = await res.json();
       return (data.elements ?? []) as OsmElement[];
@@ -222,5 +235,5 @@ export async function overpassSearch(query: string): Promise<OsmElement[]> {
       lastErr = (e as Error).name === "TimeoutError" ? "tempo limite excedido" : String((e as Error).message);
     }
   }
-  throw new SourceError(503, `Servidores Overpass (OpenStreetMap) indisponíveis no momento: ${lastErr}. Tente novamente em alguns minutos.`);
+  throw new SourceError(503, `Os servidores gratuitos do OpenStreetMap estão ocupados (${lastErr}). A fila tentará de novo automaticamente.`);
 }

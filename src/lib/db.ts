@@ -64,6 +64,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   id: "me", seller_name: null, seller_email: null, seller_phone: null, seller_whatsapp: null, seller_company: null, seller_website: null,
   default_country: "Brasil", default_state: null, default_city: null, default_radius_km: 10, default_max_results: 60, auto_audit: true,
   proposal_validity_days: 15, proposal_footer: null, alert_min_score: 70, onboarded: false,
+  google_api_key: null, search_source: "auto", google_max_grid: 3,
 };
 
 export async function getSettings(): Promise<UserSettings> {

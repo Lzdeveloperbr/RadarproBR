@@ -6,19 +6,30 @@
 
 Plataforma de prospecção comercial que encontra estabelecimentos em qualquer cidade do Brasil, analisa a presença digital de cada um, classifica oportunidades de 0 a 100 e oferece CRM, Kanban, agenda, propostas em PDF, gerador de prompts para sites/apps (Lovable), mensagens comerciais e relatórios.
 
-**100% gratuito e sem cadastro:** abra o link e use. Não precisa de conta, servidor nem chave de API.
+**Sem cadastro:** abra o link e use. Sem conta e sem servidor. A pesquisa gratuita usa o OpenStreetMap; para encontrar **muito mais** estabelecimentos (com notas e avaliações), ative o **Google Places** (opcional).
 
 ## Como funciona
 
 | Parte | Como é feito (grátis) |
 |---|---|
-| Pesquisa de estabelecimentos | OpenStreetMap — Overpass API + Nominatim, direto do navegador |
+| Pesquisa de estabelecimentos | **Google Places** (opcional, cobertura máxima) **+ OpenStreetMap** (gratuito), resultados unidos sem duplicar |
 | Mapa | Leaflet + OpenStreetMap/CARTO, com agrupamento e cores por presença digital |
 | Banco de dados | IndexedDB do navegador (cada pessoa tem seus próprios dados) |
 | Análise digital | Classificação site próprio × rede social × diretório, teste de HTTPS e checklist do conteúdo |
 | PDF, Excel, CSV | Gerados no próprio aparelho |
 | Hospedagem | GitHub Pages (deploy automático pelo GitHub Actions a cada push na `main`) |
 | App instalável | PWA (manifest, service worker, ícones) |
+
+### Google Places (recomendado para achar tudo)
+O Google Maps tem a base mais completa de comércios do Brasil. Com a chave configurada, cada pesquisa consulta o **Google e o OpenStreetMap juntos**: o mesmo estabelecimento nas duas fontes vira um só (telefone igual ou nome parecido a menos de 150 m), e os dados se completam.
+
+1. Em [console.cloud.google.com](https://console.cloud.google.com/), crie um projeto e ative o faturamento (há uso gratuito mensal; o Google pede cartão).
+2. Ative **Maps JavaScript API** e **Places API (New)**.
+3. Crie uma **chave de API** com restrição de **sites** para `https://lzdeveloperbr.github.io/*` e restrição de APIs às duas acima.
+4. Em **Cotas**, limite as solicitações por dia para não passar do uso gratuito.
+5. Para todos que abrirem o site: GitHub → *Settings → Secrets and variables → Actions → Variables* → crie `VITE_GOOGLE_MAPS_BROWSER_KEY` com a chave e rode o workflow *Deploy*. (Ou cole a chave em **Configurações → Fontes de dados** para usar só no seu navegador.)
+
+A chave de navegador fica visível no código da página — por isso a restrição de domínio e as cotas são obrigatórias.
 
 ### Análise de presença digital
 - Instagram, Facebook e diretórios **nunca** contam como site próprio.
@@ -30,7 +41,7 @@ Plataforma de prospecção comercial que encontra estabelecimentos em qualquer c
 Ficam salvos apenas no navegador. Em **Dados e backup** você pode baixar um backup (.json), restaurar em outro aparelho e proteger o armazenamento contra limpeza automática.
 
 ### Limitações
-- O OpenStreetMap é colaborativo: comércios não cadastrados não aparecem e não há notas/avaliações.
+- Sem Google, a cobertura depende do OpenStreetMap (colaborativo): comércios não cadastrados não aparecem e não há notas/avaliações.
 - Os dados não sincronizam entre aparelhos automaticamente (use o backup).
 - A fila de pesquisa em lote só avança com o app aberto.
 

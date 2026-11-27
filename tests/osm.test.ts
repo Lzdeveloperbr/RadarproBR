@@ -13,10 +13,11 @@ describe("OpenStreetMap (fonte gratuita)", () => {
   it("monta consulta Overpass válida com raio e limite", () => {
     const q = buildOverpassQuery("Barbearias", -20.4237, -49.9781, 10000, 180);
     expect(q).toContain("[out:json]");
-    expect(q).toContain('(around:10000,-20.423700,-49.978100)');
+    expect(q).toMatch(/\[bbox:-20\.5135\d,-50\.0\d+,-20\.3338\d,-49\.8\d+\]/);
+    expect(q).not.toContain("around");
     expect(q).toContain('["name"]');
     expect(q).toContain("out center tags 180;");
-    expect(buildOverpassQuery("Restaurantes", 0, 0, 999999, 10)).toContain("around:50000");
+    expect(buildOverpassQuery("Restaurantes", 0, 0, 999999, 10)).toMatch(/\[bbox:-0\.4491\d,-0\.4491\d,0\.4491\d,0\.4491\d\]/);
   });
   it("categoria personalizada vira busca segura por nome", () => {
     const f = filtersFor('tatuagem"];out;(node');

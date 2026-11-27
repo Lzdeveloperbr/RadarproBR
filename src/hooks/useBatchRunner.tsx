@@ -20,7 +20,10 @@ interface Runner {
 }
 
 const Ctx = createContext<Runner | null>(null);
-const CONCURRENCY = 2; // servidores públicos do OpenStreetMap: poucas requisições simultâneas
+const CONCURRENCY = 3;
+// O servidor público do OpenStreetMap atende poucas consultas por pessoa: pesquisas rodam uma de cada vez
+// (análises digitais não usam o OpenStreetMap e podem rodar em paralelo).
+const SEARCH_CONCURRENCY = 1;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const isPermanent = (e: unknown) => /Selecione|Informe|não encontrad|inválid/i.test(errMsg(e));
@@ -66,8 +69,8 @@ export function BatchRunnerProvider({ children }: { children: ReactNode }) {
       await db.batch_items.update(item.id, { status: "done", result, error: null, finished_at: nowIso() });
     } catch (e) {
       const attempts = item.attempts + 1;
-      const retry = !isPermanent(e) && attempts < item.max_attempts;
-      const wait = /429|limitou/.test(errMsg(e)) ? 60_000 : 8000 * 2 ** (attempts - 1);
+      const retry = !isPermanent(e) && attempts < Math.max(item.max_attempts, item.payload.type === "search" ? 5 : 3);
+      const wait = /429|limitou|ocupados/.test(errMsg(e)) ? 30_000 * attempts : 10_000 * 2 ** (attempts - 1);
       await db.batch_items.update(item.id, {
         status: retry ? "pending" : "failed", attempts, error: errMsg(e).slice(0, 500),
         next_attempt_at: retry ? new Date(Date.now() + wait).toISOString() : null, finished_at: retry ? null : nowIso(),
@@ -87,8 +90,11 @@ export function BatchRunnerProvider({ children }: { children: ReactNode }) {
         const slots = CONCURRENCY - inFlight.size;
         if (slots > 0) {
           const now = nowIso();
+          const runningSearches = (await db.batch_items.where("[batch_job_id+status]").equals([jobId, "running"]).toArray()).filter((i) => i.payload.type === "search").length;
+          let searchSlots = SEARCH_CONCURRENCY - runningSearches;
           const next = (await db.batch_items.where("[batch_job_id+status]").equals([jobId, "pending"]).toArray())
-            .filter((i) => !i.next_attempt_at || i.next_attempt_at <= now).sort((a, b) => a.seq - b.seq).slice(0, slots);
+            .filter((i) => !i.next_attempt_at || i.next_attempt_at <= now).sort((a, b) => a.seq - b.seq)
+            .filter((i) => i.payload.type !== "search" || searchSlots-- > 0).slice(0, slots);
           for (const item of next) {
             await db.batch_items.update(item.id, { status: "running", started_at: nowIso() });
             const pr: Promise<void> = processItem(jobId, item).finally(() => { inFlight.delete(pr); refreshCounts(jobId); });
