@@ -4,6 +4,7 @@ import { db, uid, nowIso, logActivity, recordUsage, ensureLead, getSettings } fr
 import type { Audit, Business, Check, Contact, Search, SearchResult, Source, Website } from "./types";
 import { nominatimGeocode, overpassSearch, buildOverpassQuery, parseOsmElement, formatAddress, describeOpeningHours, type OsmPlace } from "./engine/osm";
 import { googleTextSearch, gridCells, type GooglePlace } from "./engine/google";
+import { tomtomPoiSearch, type TomTomPlace } from "./engine/tomtom";
 import { CATEGORY_QUERIES } from "./engine/categories";
 import { classifyUrl, normalizeUrl, hostnameOf } from "./engine/classify";
 import { computeOpportunity } from "./engine/scoring";
@@ -28,10 +29,14 @@ export interface SearchParams {
 
 const clean = (s: unknown, max = 120) => (typeof s === "string" ? s.trim().slice(0, max) : "");
 
-export type SearchSource = "auto" | "both" | "google" | "osm";
+export type SearchSource = "auto" | "both" | "google" | "tomtom" | "osm";
 
 export function googleKey(settingsKey?: string | null): string | null {
   return (settingsKey && settingsKey.trim()) || (import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY as string | undefined) || null;
+}
+
+export function tomtomKey(settingsKey?: string | null): string | null {
+  return (settingsKey && settingsKey.trim()) || (import.meta.env.VITE_TOMTOM_API_KEY as string | undefined) || null;
 }
 
 type Candidate = {
@@ -75,6 +80,27 @@ function fromGoogle(g: GooglePlace, category: string, distance: number): Candida
       postal_code: g.postal_code, country: "Brasil", lat: g.lat, lng: g.lng, phone: g.phone, international_phone: g.intl_phone, google_maps_uri: g.maps_uri, osm_url: null,
       places_website_uri: site, rating: g.rating, user_rating_count: g.rating_count, business_status: g.status, opening_hours: g.hours ? { weekdayDescriptions: g.hours } : null,
       source: "google", digital_status: kind === "own_site" ? "site_pending" : "unknown", primary_website: kind === "own_site" ? site : null, has_own_site: null, site_online: null,
+      site_https: null, site_has_location: null, site_mobile_ready: null, has_whatsapp: null, has_instagram: contacts.some((c) => c.type === "instagram") || null,
+      has_facebook: contacts.some((c) => c.type === "facebook") || null, has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
+    },
+  };
+}
+
+function fromTomTom(t: TomTomPlace, category: string, distance: number): Candidate {
+  const site = t.website ? normalizeUrl(t.website) : null;
+  const kind = classifyUrl(site);
+  const contacts: Candidate["contacts"] = [];
+  if (t.phone) contacts.push({ type: "phone", value: t.phone, url: `tel:${t.phone.replace(/[^\d+]/g, "")}`, source: "tomtom" });
+  if (site && kind === "social") contacts.push({ type: /instagram/i.test(site) ? "instagram" : /facebook|fb\./i.test(site) ? "facebook" : "other", value: site, url: site, source: "tomtom" });
+  return {
+    category, distance, contacts, norm: nameNorm(t.name),
+    b: {
+      place_id: t.id, dedupe_key: dedupeKey(t.name, t.phone, t.lat, t.lng), name: t.name, category, primary_type: t.category, primary_type_label: t.category,
+      types: t.categories, formatted_address: t.address, street: t.street, street_number: t.number, neighborhood: t.neighborhood, city: t.city, state: t.state,
+      postal_code: t.postal_code, country: "Brasil", lat: t.lat, lng: t.lng, phone: t.phone, international_phone: t.phone,
+      google_maps_uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.name)}%20${t.lat},${t.lng}`, osm_url: null,
+      places_website_uri: site, rating: null, user_rating_count: null, business_status: "OPERATIONAL", opening_hours: null, source: "tomtom",
+      digital_status: kind === "own_site" ? "site_pending" : "unknown", primary_website: kind === "own_site" ? site : null, has_own_site: null, site_online: null,
       site_https: null, site_has_location: null, site_mobile_ready: null, has_whatsapp: null, has_instagram: contacts.some((c) => c.type === "instagram") || null,
       has_facebook: contacts.some((c) => c.type === "facebook") || null, has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
     },
@@ -125,10 +151,14 @@ export async function searchPlaces(p: SearchParams) {
   let radiusKm = Math.max(0.5, Math.min(50, Number(p.radius_km) || 10));
   const settings = await getSettings();
   const key = googleKey(settings.google_api_key);
+  const ttKey = tomtomKey(settings.tomtom_api_key);
   const source: SearchSource = p.source ?? settings.search_source ?? "auto";
-  const useGoogle = !!key && source !== "osm";
-  const useOsm = source !== "google" || !key;
+  const auto = source === "auto" || source === "both";
+  const useGoogle = !!key && (auto || source === "google");
+  const useTomTom = !!ttKey && (auto || source === "tomtom");
+  const useOsm = auto || source === "osm" || (!useGoogle && !useTomTom);
   if (source === "google" && !key) throw new Error("Fonte Google selecionada, mas nenhuma chave do Google está configurada (Configurações → Fontes de dados).");
+  if (source === "tomtom" && !ttKey) throw new Error("Fonte TomTom selecionada, mas nenhuma chave da TomTom está configurada (Configurações → Fontes de dados).");
 
   const search: Search = {
     id: uid(), country, city: city || "Ponto no mapa", state: state || null, neighborhood: neighborhood || null, categories, custom_category: custom || null,
@@ -175,7 +205,22 @@ export async function searchPlaces(p: SearchParams) {
           warnings.push((e as Error).message);
         }
       }
-      if (useOsm || (useGoogle && warnings.length)) {
+      if (useTomTom) {
+        try {
+          const res = await tomtomPoiSearch(ttKey!, CATEGORY_QUERIES[category] ?? category, center.lat, center.lng, radiusKm * 1000, Math.min(300, perCategory * 2));
+          calls += Math.max(1, Math.ceil(res.length / 100));
+          await recordUsage("tomtom", "poiSearch");
+          for (const t of res) {
+            const d = haversineKm(center.lat, center.lng, t.lat, t.lng);
+            if (d <= radiusKm * 1.05) list.push(fromTomTom(t, category, d));
+          }
+        } catch (e) {
+          await recordUsage("tomtom", "poiSearch", false);
+          if (source === "tomtom") throw e;
+          warnings.push((e as Error).message);
+        }
+      }
+      if (useOsm || warnings.length) {
         const q = buildOverpassQuery(category, center.lat, center.lng, radiusKm * 1000, Math.min(1000, perCategory * 3));
         try {
           const elements = await overpassSearch(q);
@@ -188,13 +233,14 @@ export async function searchPlaces(p: SearchParams) {
           }
         } catch (e) {
           await recordUsage("openstreetmap", "overpass", false);
-          if (!useGoogle || !list.length) throw e; // com resultados do Google, segue sem o OSM
+          if (!list.length) throw e; // com resultados de outra fonte, segue sem o OSM
           warnings.push((e as Error).message);
         }
       }
       // Fusão entre fontes (Google tem prioridade; OSM completa site/redes/WhatsApp)
       const merged: Candidate[] = [];
-      for (const c of list.sort((a, b) => (a.b.source === "google" ? 0 : 1) - (b.b.source === "google" ? 0 : 1) || a.distance - b.distance)) {
+      const rank = (x: Candidate) => (x.b.source === "google" ? 0 : x.b.source === "tomtom" ? 1 : 2);
+      for (const c of list.sort((a, b) => rank(a) - rank(b) || a.distance - b.distance)) {
         const twin = merged.find((m) => m.b.place_id === c.b.place_id || sameBusiness({ ...m.b, norm: m.norm }, { ...c.b, norm: c.norm }));
         if (twin) {
           twin.b = fillMissing(twin.b, { ...c.b, place_id: undefined, source: undefined, dedupe_key: undefined } as any);
@@ -219,7 +265,7 @@ export async function searchPlaces(p: SearchParams) {
           const pub = { name: f.b.name, formatted_address: f.b.formatted_address, phone: f.b.phone, rating: f.b.rating, user_rating_count: f.b.user_rating_count, opening_hours: f.b.opening_hours, business_status: f.b.business_status };
           const upd = fillMissing(hit.x as any, { ...f.b, place_id: undefined, dedupe_key: undefined } as any);
           // Dados públicos do Google substituem os antigos (são os mais atualizados)
-          if (f.b.source === "google") Object.assign(upd, Object.fromEntries(Object.entries(pub).filter(([, v]) => v != null)));
+          if (f.b.source === "google" || (f.b.source === "tomtom" && hit.x.source === "openstreetmap")) Object.assign(upd, Object.fromEntries(Object.entries(pub).filter(([, v]) => v != null)));
           await db.businesses.put({ ...upd, id, updated_at: nowIso() });
           hit.x = { ...upd, id };
         } else {
@@ -241,13 +287,13 @@ export async function searchPlaces(p: SearchParams) {
         if (f.b.places_website_uri && !(await db.websites.where("[business_id+url]").equals([id, f.b.places_website_uri]).first())) {
           const kind = classifyUrl(f.b.places_website_uri);
           await db.websites.add({ id: uid(), business_id: id, url: f.b.places_website_uri, final_url: null, domain: hostnameOf(f.b.places_website_uri), kind, source: f.b.source,
-            verified: true, verification_note: f.b.source === "google" ? "Informado no perfil do Google" : "Informado no cadastro do OpenStreetMap",
+            verified: true, verification_note: f.b.source === "google" ? "Informado no perfil do Google" : f.b.source === "tomtom" ? "Informado na base da TomTom" : "Informado no cadastro do OpenStreetMap",
             is_primary: kind === "own_site" && !(await db.websites.where("business_id").equals(id).filter((w) => w.is_primary).count()), is_online: null, https: null, last_checked_at: null, error: null });
         }
       }
     });
     await db.searches.update(search.id, { status: "completed", total_found: results.length, total_new: totalNew, api_calls: calls, completed_at: nowIso(), error: warnings.length ? warnings[0] : null });
-    await logActivity("search.completed", { type: "search", id: search.id }, { city, categories, found: results.length, new: totalNew, sources: [useGoogle && "google", useOsm && "osm"].filter(Boolean) });
+    await logActivity("search.completed", { type: "search", id: search.id }, { city, categories, found: results.length, new: totalNew, sources: [useGoogle && "google", useTomTom && "tomtom", useOsm && "osm"].filter(Boolean) });
     return { search: { ...search, total_found: results.length }, business_ids: results.map((r) => r.business_id), found: results.length, new: totalNew, warnings };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -298,7 +344,7 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
   const biz = await db.businesses.get(businessId);
   if (!biz) throw new Error("Estabelecimento não encontrado");
   const settings = await getSettings();
-  const sourceName = biz.source === "google" ? "Google" : biz.source === "openstreetmap" ? "OpenStreetMap" : "Cadastro manual";
+  const sourceName = biz.source === "google" ? "Google" : biz.source === "tomtom" ? "TomTom" : biz.source === "openstreetmap" ? "OpenStreetMap" : "Cadastro manual";
   const sources: Source[] = [{ name: sourceName, url: (biz.source === "google" ? biz.google_maps_uri : biz.osm_url) ?? undefined, type: "places", result: biz.places_website_uri ? `Site informado: ${biz.places_website_uri}` : "Nenhum site informado no cadastro", at: biz.updated_at }];
   const websites = await db.websites.where("business_id").equals(businessId).toArray();
   let own = websites.find((w) => w.kind === "own_site" && w.is_primary) ?? websites.find((w) => w.kind === "own_site");

@@ -28,7 +28,7 @@ export interface Business {
   user_rating_count: number | null;
   business_status: string | null;
   opening_hours: { weekdayDescriptions?: string[]; osm?: string } | null;
-  source: "google" | "openstreetmap" | "manual";
+  source: "google" | "tomtom" | "openstreetmap" | "manual";
   digital_status: DigitalStatus;
   primary_website: string | null;
   has_own_site: boolean | null;
@@ -207,7 +207,9 @@ export interface UserSettings {
   onboarded: boolean;
   /** Chave de navegador do Google (opcional, substitui a do site). */
   google_api_key: string | null;
-  search_source: "auto" | "both" | "google" | "osm";
+  search_source: "auto" | "both" | "google" | "tomtom" | "osm";
+  /** Chave da TomTom (opcional, substitui a do site). */
+  tomtom_api_key: string | null;
   /** Tamanho máximo da grade de consultas do Google por categoria (n×n). */
   google_max_grid: number;
 }

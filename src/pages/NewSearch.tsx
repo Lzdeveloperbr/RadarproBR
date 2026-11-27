@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Radar, MapPin, Sparkles, Crosshair, Info } from "lucide-react";
 import { useSettings } from "../hooks/useSettings";
-import { googleKey } from "../lib/services";
+import { googleKey, tomtomKey } from "../lib/services";
 import { useBatchRunner } from "../hooks/useBatchRunner";
 import { Button, Card, CardHeader, Field, PageHeader, Toggle } from "../components/ui";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -23,12 +23,14 @@ export function NewSearchPage() {
   const nav = useNavigate();
   const [f, setF] = useState({
     country: "Brasil", state: "", city: "", neighborhood: "", categories: [] as string[], custom: "",
-    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true, source: "auto" as "auto" | "google" | "osm",
+    radius: 10, max: 60, filter: "all", wholeCity: false, autoAudit: true, source: "auto" as "auto" | "google" | "tomtom" | "osm",
   });
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [useCenter, setUseCenter] = useState(false);
   const [loading, setLoading] = useState(false);
   const hasGoogle = !!googleKey(settings.google_api_key);
+  const hasTomTom = !!tomtomKey(settings.tomtom_api_key);
+  const autoLabel = ["OpenStreetMap", hasTomTom && "TomTom", hasGoogle && "Google"].filter(Boolean).join(" + ");
 
   useEffect(() => {
     if (!settings) return;
@@ -88,9 +90,10 @@ export function NewSearchPage() {
               <Field label="7. Quantidade máxima de resultados" hint="Até 300 por pesquisa, divididos entre as categorias.">
                 <input type="number" min={1} max={300} className="input" value={f.max} onChange={(e) => setF({ ...f, max: Math.max(1, Math.min(300, Number(e.target.value) || 1)) })} />
               </Field>
-              <Field label="Fonte de dados" hint={hasGoogle ? "Google + OpenStreetMap juntos encontram o máximo de estabelecimentos, com notas e avaliações." : "Sem chave do Google: usando OpenStreetMap (gratuito). Configure o Google em Configurações para achar muito mais."}>
+              <Field label="Fonte de dados" hint={hasGoogle || hasTomTom ? "Todas as fontes juntas encontram o máximo de estabelecimentos, sem duplicar." : "Usando OpenStreetMap. Ative a TomTom (grátis) em Configurações para achar muito mais."}>
                 <select className="input" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value as typeof f.source })}>
-                  <option value="auto">{hasGoogle ? "Google + OpenStreetMap (máximo)" : "OpenStreetMap (gratuito)"}</option>
+                  <option value="auto">{autoLabel}{hasGoogle || hasTomTom ? " (máximo)" : " (gratuito)"}</option>
+                  {hasTomTom && <option value="tomtom">Somente TomTom</option>}
                   {hasGoogle && <option value="google">Somente Google Places</option>}
                   <option value="osm">Somente OpenStreetMap</option>
                 </select>
@@ -141,7 +144,7 @@ export function NewSearchPage() {
           </Card>
           <Card className="p-4 text-xs text-ink-300 space-y-2">
             <div className="flex items-center gap-2 text-white font-medium text-sm"><Info className="size-4 text-lime-400" />Como funciona</div>
-            <p>1. A pesquisa consulta o Google Places (se configurado) e o OpenStreetMap, e junta os resultados sem duplicar.</p>
+            <p>1. A pesquisa consulta o OpenStreetMap e, se configurados, a TomTom e o Google — e junta os resultados sem duplicar.</p>
             <p>2. Cada estabelecimento é salvo sem duplicação (ID da fonte + nome/telefone/coordenadas).</p>
             <p>3. A análise classifica a presença digital (site próprio x redes sociais), testa se o site responde com HTTPS e calcula a pontuação. Você completa o checklist do conteúdo do site na ficha.</p>
             <p>Nenhum resultado é simulado.</p>

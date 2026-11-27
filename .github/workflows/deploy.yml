@@ -30,6 +30,7 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
           VITE_GOOGLE_MAPS_BROWSER_KEY: ${{ vars.VITE_GOOGLE_MAPS_BROWSER_KEY }}
+          VITE_TOMTOM_API_KEY: ${{ vars.VITE_TOMTOM_API_KEY }}
         run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

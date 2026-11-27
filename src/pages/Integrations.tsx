@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Plug, CheckCircle2, AlertTriangle, RefreshCw, Map as MapIcon, Globe2, FileDown, Database, Search, Clock } from "lucide-react";
 import { Badge, Button, Card, PageHeader } from "../components/ui";
 import { db, getSettings } from "../lib/db";
-import { googleKey } from "../lib/services";
+import { googleKey, tomtomKey } from "../lib/services";
+import { tomtomPoiSearch } from "../lib/engine/tomtom";
 import { googleTextSearch, gridCells } from "../lib/engine/google";
 import { Link } from "react-router-dom";
 import { fmtNumber } from "../lib/format";
@@ -34,7 +35,7 @@ export function IntegrationsPage() {
       const since = new Date(Date.now() - 30 * 86400_000).toISOString();
       const rows = await db.usage.where("created_at").above(since).toArray();
       const agg = (p: string) => ({ total: rows.filter((r) => r.provider === p).length, errors: rows.filter((r) => r.provider === p && !r.success).length });
-      return { osm: agg("openstreetmap"), site: agg("site_check"), google: agg("google"), hasGoogle: !!googleKey((await getSettings()).google_api_key) };
+      return { osm: agg("openstreetmap"), site: agg("site_check"), google: agg("google"), tomtom: agg("tomtom"), hasGoogle: !!googleKey((await getSettings()).google_api_key), hasTomTom: !!tomtomKey((await getSettings()).tomtom_api_key) };
     },
   });
   const runTests = async () => {
@@ -49,17 +50,24 @@ export function IntegrationsPage() {
       try { const r = await googleTextSearch(key, "padaria em São Paulo", gridCells(-23.55, -46.63, 2, 1)[0]); goo = { state: "connected", message: `Google Places respondeu (${r.length} resultados no teste)` }; }
       catch (e: any) { goo = { state: "error", message: e.message }; }
     }
-    setResults({ nominatim: nom, overpass: ovp, google: goo });
+    let tt: Status = { state: "pending", message: "Sem chave da TomTom configurada" };
+    const tk = tomtomKey((await getSettings()).tomtom_api_key);
+    if (tk) {
+      try { const r = await tomtomPoiSearch(tk, "padaria", -23.55, -46.63, 2000, 10); tt = { state: "connected", message: `TomTom respondeu (${r.length} resultados no teste)` }; }
+      catch (e: any) { tt = { state: "error", message: e.message }; }
+    }
+    setResults({ nominatim: nom, overpass: ovp, google: goo, tomtom: tt });
     setTesting(false);
   };
   const items = [
+    { key: "tomtom", title: "TomTom Search (gratuita, sem cartão)", icon: Search, desc: usage.data?.hasTomTom ? "Chave configurada. Base comercial de estabelecimentos com telefone e site." : "Recomendada: crie uma chave grátis em developer.tomtom.com e cole em Configurações.", usage: usage.data?.tomtom },
     { key: "google", title: "Google Places (a mais completa)", icon: Search, desc: usage.data?.hasGoogle ? "Chave configurada. Mais estabelecimentos, notas, avaliações, telefone e site." : "Opcional. Configure a chave em Configurações → Fontes de dados para encontrar muito mais.", usage: usage.data?.google },
     { key: "overpass", title: "OpenStreetMap — Overpass API", icon: Search, desc: "Pesquisa de estabelecimentos por categoria e raio. Gratuita, sem chave.", usage: usage.data?.osm },
     { key: "nominatim", title: "OpenStreetMap — Nominatim", icon: Globe2, desc: "Localiza cidades e bairros (coordenadas e área do município). Gratuita, sem chave." },
   ];
   return (
     <>
-      <PageHeader title="Integrações" subtitle="OpenStreetMap gratuito sempre ativo; Google Places opcional para cobertura máxima" icon={Plug}
+      <PageHeader title="Integrações" subtitle="OpenStreetMap sempre ativo; TomTom grátis e Google opcional para cobertura máxima" icon={Plug}
         actions={<Button icon={RefreshCw} loading={testing} onClick={runTests}>Testar conexões</Button>} />
       <div className="grid gap-4 md:grid-cols-2">
         {items.map((it) => {
@@ -75,7 +83,7 @@ export function IntegrationsPage() {
                 <Badge className={cls}><Icon className="size-3" />{label}</Badge>
               </div>
               <p className="mt-3 text-xs text-ink-300">{st.message}</p>
-              {it.key === "google" && !usage.data?.hasGoogle && <Link to="/configuracoes" className="mt-2 inline-block text-xs text-lime-400 hover:underline">Configurar chave do Google →</Link>}
+              {((it.key === "google" && !usage.data?.hasGoogle) || (it.key === "tomtom" && !usage.data?.hasTomTom)) && <Link to="/configuracoes" className="mt-2 inline-block text-xs text-lime-400 hover:underline">Configurar chave →</Link>}
               {it.usage && <p className="mt-2 text-[11px] text-ink-500">Uso neste navegador (30 dias): {fmtNumber(it.usage.total)} consultas · {it.usage.errors} falhas</p>}
             </Card>
           );

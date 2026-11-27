@@ -12,7 +12,7 @@ Plataforma de prospecção comercial que encontra estabelecimentos em qualquer c
 
 | Parte | Como é feito (grátis) |
 |---|---|
-| Pesquisa de estabelecimentos | **Google Places** (opcional, cobertura máxima) **+ OpenStreetMap** (gratuito), resultados unidos sem duplicar |
+| Pesquisa de estabelecimentos | **OpenStreetMap** (sempre) **+ TomTom** (grátis, sem cartão) **+ Google Places** (opcional), resultados unidos sem duplicar |
 | Mapa | Leaflet + OpenStreetMap/CARTO, com agrupamento e cores por presença digital |
 | Banco de dados | IndexedDB do navegador (cada pessoa tem seus próprios dados) |
 | Análise digital | Classificação site próprio × rede social × diretório, teste de HTTPS e checklist do conteúdo |
@@ -20,7 +20,13 @@ Plataforma de prospecção comercial que encontra estabelecimentos em qualquer c
 | Hospedagem | GitHub Pages (deploy automático pelo GitHub Actions a cada push na `main`) |
 | App instalável | PWA (manifest, service worker, ícones) |
 
-### Google Places (recomendado para achar tudo)
+### TomTom (gratuita, sem cartão — recomendada)
+Base comercial de estabelecimentos com telefone e site. O plano gratuito não pede cartão e, ao passar do limite, as consultas são bloqueadas em vez de cobradas.
+
+1. Crie uma conta em [developer.tomtom.com](https://developer.tomtom.com/) e copie a chave (API Key) do painel.
+2. Para todos que abrirem o site: GitHub → *Settings → Secrets and variables → Actions → Variables* → crie `VITE_TOMTOM_API_KEY` e rode o workflow *Deploy*. (Ou cole em **Configurações → Fontes de dados** para usar só no seu navegador.)
+
+### Google Places (opcional — a mais completa, exige cartão)
 O Google Maps tem a base mais completa de comércios do Brasil. Com a chave configurada, cada pesquisa consulta o **Google e o OpenStreetMap juntos**: o mesmo estabelecimento nas duas fontes vira um só (telefone igual ou nome parecido a menos de 150 m), e os dados se completam.
 
 1. Em [console.cloud.google.com](https://console.cloud.google.com/), crie um projeto e ative o faturamento (há uso gratuito mensal; o Google pede cartão).

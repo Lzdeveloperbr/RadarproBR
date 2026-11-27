@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Settings, Save, Briefcase, Radar, Bell, ShieldCheck, Database, FlaskConical } from "lucide-react";
-import { googleKey } from "../lib/services";
+import { googleKey, tomtomKey } from "../lib/services";
+import { tomtomPoiSearch } from "../lib/engine/tomtom";
 import { googleTextSearch, gridCells } from "../lib/engine/google";
 import { useSettings } from "../hooks/useSettings";
 import { Button, Card, CardHeader, Field, PageHeader, Toggle } from "../components/ui";
@@ -16,6 +17,7 @@ export function SettingsPage() {
   const set = (patch: Partial<UserSettings>) => setS({ ...s, ...patch });
   const [testing, setTesting] = useState(false);
   const siteKey = !!import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY;
+  const ttSiteKey = !!import.meta.env.VITE_TOMTOM_API_KEY;
   const testGoogle = async () => {
     const key = googleKey(s.google_api_key);
     if (!key) return toast.error("Informe uma chave do Google primeiro");
@@ -23,6 +25,15 @@ export function SettingsPage() {
     try {
       const r = await googleTextSearch(key, "padaria em São Paulo", gridCells(-23.55, -46.63, 2, 1)[0]);
       toast.success(`Google Places funcionando: ${r.length} resultados no teste`);
+    } catch (e: any) { toast.error(e.message, { duration: 10000 }); } finally { setTesting(false); }
+  };
+  const testTomTom = async () => {
+    const key = tomtomKey(s.tomtom_api_key);
+    if (!key) return toast.error("Informe a chave da TomTom primeiro");
+    setTesting(true);
+    try {
+      const r = await tomtomPoiSearch(key, "padaria", -23.55, -46.63, 2000, 10);
+      toast.success(`TomTom funcionando: ${r.length} resultados no teste`);
     } catch (e: any) { toast.error(e.message, { duration: 10000 }); } finally { setTesting(false); }
   };
   const save = async () => {
@@ -52,16 +63,21 @@ export function SettingsPage() {
           </div>
         </Card>
         <Card className="xl:col-span-2">
-          <CardHeader title="Fontes de dados" icon={Database} subtitle={googleKey(s.google_api_key) ? "Google Places ativo — máxima cobertura" : "Usando somente OpenStreetMap (gratuito)"} />
+          <CardHeader title="Fontes de dados" icon={Database} subtitle={`Ativas: ${["OpenStreetMap", tomtomKey(s.tomtom_api_key) && "TomTom", googleKey(s.google_api_key) && "Google"].filter(Boolean).join(" + ")}`} />
           <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
             <div className="space-y-3">
               <Field label="Fonte das pesquisas">
                 <select className="input" value={s.search_source} onChange={(e) => set({ search_source: e.target.value as UserSettings["search_source"] })}>
-                  <option value="auto">Automático — Google + OpenStreetMap juntos (se houver chave)</option>
+                  <option value="auto">Automático — todas as fontes configuradas juntas</option>
+                  <option value="tomtom">Somente TomTom</option>
                   <option value="google">Somente Google Places</option>
                   <option value="osm">Somente OpenStreetMap (gratuito)</option>
                 </select>
               </Field>
+              <Field label={ttSiteKey ? "Chave da TomTom (opcional — o site já tem uma)" : "Chave da TomTom — gratuita, sem cartão (recomendado)"} hint="Crie grátis em developer.tomtom.com. Fica salva só neste navegador.">
+                <input className="input font-mono" type="password" autoComplete="off" placeholder="Chave da TomTom" value={s.tomtom_api_key ?? ""} onChange={(e) => set({ tomtom_api_key: e.target.value.trim() || null })} />
+              </Field>
+              <Button variant="secondary" icon={FlaskConical} loading={testing} onClick={testTomTom}>Testar TomTom</Button>
               <Field label={siteKey ? "Chave do Google (opcional — o site já tem uma)" : "Chave do Google (Maps JavaScript API + Places API New)"} hint="Fica salva só neste navegador. Use uma chave restrita ao domínio do site.">
                 <input className="input font-mono" type="password" autoComplete="off" placeholder="AIza..." value={s.google_api_key ?? ""} onChange={(e) => set({ google_api_key: e.target.value.trim() || null })} />
               </Field>
@@ -71,7 +87,11 @@ export function SettingsPage() {
               <Button variant="secondary" icon={FlaskConical} loading={testing} onClick={testGoogle}>Testar Google</Button>
             </div>
             <div className="rounded-xl bg-ink-950/60 border border-white/5 p-4 text-xs text-ink-300 space-y-1.5">
-              <div className="text-white font-medium text-sm">Como criar a chave do Google</div>
+              <div className="text-white font-medium text-sm">TomTom (grátis, sem cartão)</div>
+              <p>1. Crie uma conta em <a className="text-lime-400 hover:underline" href="https://developer.tomtom.com/" target="_blank" rel="noreferrer">developer.tomtom.com</a>.</p>
+              <p>2. No painel, copie a chave (API Key) criada automaticamente — ela já inclui a Search API.</p>
+              <p>3. Cole aqui e clique em Testar TomTom. Ao passar do limite gratuito, a TomTom bloqueia as consultas em vez de cobrar.</p>
+              <div className="text-white font-medium text-sm pt-3">Google (opcional, exige cartão)</div>
               <p>1. Acesse <a className="text-lime-400 hover:underline" href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">console.cloud.google.com</a>, crie um projeto e ative o faturamento (o Google pede cartão, mas oferece uso gratuito mensal).</p>
               <p>2. Em <b>APIs e serviços → Biblioteca</b>, ative <b>Maps JavaScript API</b> e <b>Places API (New)</b>.</p>
               <p>3. Em <b>Credenciais → Criar credenciais → Chave de API</b>. Em restrições: <b>Sites</b> → adicione <code className="text-lime-400">{location.origin}/*</code>; em APIs → só as duas acima.</p>

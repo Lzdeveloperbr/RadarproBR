@@ -150,7 +150,7 @@ export function BusinessDetailPage() {
         <div className="space-y-4 xl:col-span-2">
           {/* Dados comerciais públicos */}
           <Card>
-            <CardHeader title="Dados comerciais públicos" subtitle={<span className="flex gap-3">{b.source === "google" && <a className="text-lime-400 hover:underline" href={b.google_maps_uri ?? "#"} target="_blank" rel="noreferrer">Fonte: Google ↗</a>}{b.osm_url && <a className="text-lime-400 hover:underline" href={b.osm_url} target="_blank" rel="noreferrer">OpenStreetMap ↗</a>}</span>} icon={Building2} />
+            <CardHeader title="Dados comerciais públicos" subtitle={<span className="flex gap-3">{b.source === "google" && <a className="text-lime-400 hover:underline" href={b.google_maps_uri ?? "#"} target="_blank" rel="noreferrer">Fonte: Google ↗</a>}{b.source === "tomtom" && <span>Fonte: TomTom</span>}{b.osm_url && <a className="text-lime-400 hover:underline" href={b.osm_url} target="_blank" rel="noreferrer">OpenStreetMap ↗</a>}</span>} icon={Building2} />
             <div className="grid gap-x-8 px-5 pb-5 md:grid-cols-2">
               <div>
                 <Row label="Nome comercial">{b.name}</Row>
@@ -167,7 +167,7 @@ export function BusinessDetailPage() {
                 <Row label="Site">{b.primary_website ? <a className="text-lime-400 hover:underline" href={b.primary_website} target="_blank" rel="noreferrer">{b.primary_website}</a> : null}</Row>
                 <Row label="Instagram">{instagram ? <a className="text-lime-400 hover:underline" href={instagram} target="_blank" rel="noreferrer">{instagram.replace(/^https?:\/\/(www\.)?/, "")}</a> : null}</Row>
                 <Row label="Facebook">{facebook ? <a className="text-lime-400 hover:underline" href={facebook} target="_blank" rel="noreferrer">{facebook.replace(/^https?:\/\/(www\.)?/, "")}</a> : null}</Row>
-                <Row label="Avaliação pública">{b.rating == null && b.source === "openstreetmap" ? <span className="text-ink-500">Não disponível no OpenStreetMap</span> : b.rating != null ? <span className="inline-flex items-center gap-1"><Star className="size-3.5 fill-amber-300 text-amber-300" />{b.rating} · {b.user_rating_count} avaliações</span> : null}</Row>
+                <Row label="Avaliação pública">{b.rating == null && b.source !== "google" ? <span className="text-ink-500">Disponível apenas com o Google</span> : b.rating != null ? <span className="inline-flex items-center gap-1"><Star className="size-3.5 fill-amber-300 text-amber-300" />{b.rating} · {b.user_rating_count} avaliações</span> : null}</Row>
                 <Row label="Coordenadas">{b.lat != null ? `${b.lat.toFixed(6)}, ${b.lng?.toFixed(6)}` : null}</Row>
               </div>
             </div>
@@ -217,7 +217,7 @@ export function BusinessDetailPage() {
                   {contacts.map((c: any) => (
                     <a key={c.id} href={c.url ?? undefined} target="_blank" rel="noreferrer" className="chip">
                       {c.type === "instagram" ? <Instagram className="size-3" /> : c.type === "facebook" ? <Facebook className="size-3" /> : c.type === "whatsapp" ? <MessageCircle className="size-3" /> : c.type === "phone" ? <Phone className="size-3" /> : <Globe className="size-3" />}
-                      {c.value.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}<span className="text-ink-500">· {c.source === "openstreetmap" ? "OSM" : c.source === "google" ? "Google" : c.source}</span>
+                      {c.value.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}<span className="text-ink-500">· {c.source === "openstreetmap" ? "OSM" : c.source === "google" ? "Google" : c.source === "tomtom" ? "TomTom" : c.source}</span>
                     </a>
                   ))}
                 </div>
