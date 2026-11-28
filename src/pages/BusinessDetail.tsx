@@ -17,11 +17,13 @@ import { MapView } from "../components/MapView";
 import { CrmPanel } from "../components/business/CrmPanel";
 import { MessagePanel } from "../components/business/MessagePanel";
 import { ManualChecklist } from "../components/business/ManualChecklist";
+import { TechPanel } from "../components/business/TechPanel";
+import { CnpjPanel } from "../components/business/CnpjPanel";
 import { CHECK_LABELS, KIND_LABEL } from "../lib/constants";
 import { copyText, fmtDateTime, mapsRoute, whatsappLink } from "../lib/format";
 
 const CHECK_ORDER = ["own_site", "site_online", "https", "mobile_viewport", "address", "postal_code", "embedded_map", "maps_link", "directions_button", "coordinates",
-  "phone", "whatsapp", "email", "contact_form", "digital_menu", "online_booking", "services", "gallery", "social_links", "opening_hours", "phone_places", "whatsapp_places", "hours_places", "shared_domain"];
+  "phone", "whatsapp", "email", "contact_form", "digital_menu", "online_booking", "services", "gallery", "social_links", "opening_hours", "tech_performance", "tech_seo", "phone_places", "whatsapp_places", "hours_places", "shared_domain"];
 
 function CheckIcon({ v, invert }: { v: boolean | null | undefined; invert?: boolean }) {
   const good = invert ? v === false : v === true;
@@ -132,7 +134,7 @@ export function BusinessDetailPage() {
             }}>Excluir da base</Button>
           </div>
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-10">
+        <div className="mt-5 flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:min-w-[140px] sm:[&>*]:flex-none sm:[&>*]:min-w-0">
           <a href={b.primary_website ?? undefined} target="_blank" rel="noreferrer" aria-disabled={!b.primary_website}><Button size="sm" variant="secondary" icon={Globe} className="w-full" disabled={!b.primary_website}>Abrir site</Button></a>
           <a href={b.google_maps_uri ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name + " " + (b.formatted_address ?? ""))}`} target="_blank" rel="noreferrer"><Button size="sm" variant="secondary" icon={MapPin} className="w-full">Google Maps</Button></a>
           <a href={waTarget ? whatsappLink(waTarget) ?? undefined : undefined} target="_blank" rel="noreferrer"><Button size="sm" variant="secondary" icon={MessageCircle} className="w-full" disabled={!waTarget}>WhatsApp</Button></a>
@@ -143,6 +145,7 @@ export function BusinessDetailPage() {
           <Button size="sm" icon={FileText} onClick={() => nav(`/propostas/nova?business=${b.id}`)}>Gerar proposta</Button>
           <Button size="sm" variant="outline" icon={Wand2} onClick={() => nav(`/gerador-sites?business=${b.id}`)}>Gerar site</Button>
           <Button size="sm" variant="outline" icon={Smartphone} onClick={() => nav(`/gerador-sites?business=${b.id}&kind=app`)}>Gerar app</Button>
+          <Button size="sm" variant="outline" icon={Wand2} onClick={() => nav(`/gerador-sites?business=${b.id}&kind=demo`)}>Site demonstração</Button>
         </div>
       </Card>
 
@@ -217,7 +220,7 @@ export function BusinessDetailPage() {
                   {contacts.map((c: any) => (
                     <a key={c.id} href={c.url ?? undefined} target="_blank" rel="noreferrer" className="chip">
                       {c.type === "instagram" ? <Instagram className="size-3" /> : c.type === "facebook" ? <Facebook className="size-3" /> : c.type === "whatsapp" ? <MessageCircle className="size-3" /> : c.type === "phone" ? <Phone className="size-3" /> : <Globe className="size-3" />}
-                      {c.value.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}<span className="text-ink-500">· {c.source === "openstreetmap" ? "OSM" : c.source === "google" ? "Google" : c.source === "tomtom" ? "TomTom" : c.source}</span>
+                      {c.value.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}<span className="text-ink-500">· {c.source === "openstreetmap" ? "OSM" : c.source === "google" ? "Google" : c.source === "tomtom" ? "TomTom" : c.source === "receita" ? "Receita" : c.source}</span>
                     </a>
                   ))}
                 </div>
@@ -273,6 +276,7 @@ export function BusinessDetailPage() {
             )}
           </Card>
 
+          {b.primary_website && <TechPanel businessId={b.id} url={b.primary_website} audit={last} onDone={() => { qc.invalidateQueries({ queryKey: ["business", id] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); }} />}
           {b.primary_website && last && <ManualChecklist key={last.id} businessId={b.id} url={b.primary_website} checks={checks} onDone={() => { qc.invalidateQueries({ queryKey: ["business", id] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); }} />}
           <MessagePanel business={b} opportunity={opp} phone={waTarget} onSaved={() => qc.invalidateQueries({ queryKey: ["business", id] })} />
         </div>
@@ -282,6 +286,7 @@ export function BusinessDetailPage() {
             <MapView businesses={[b]} selectedId={b.id} className="h-64 w-full rounded-xl overflow-hidden" />
           </Card>
           <CrmPanel businessId={b.id} />
+          <CnpjPanel key={b.cnpj ?? "x"} business={b} onSaved={() => qc.invalidateQueries({ queryKey: ["business", id] })} />
 
           {/* Fontes consultadas */}
           <Card>

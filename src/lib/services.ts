@@ -5,10 +5,11 @@ import type { Audit, Business, Check, Contact, Search, SearchResult, Source, Web
 import { nominatimGeocode, overpassSearch, buildOverpassQuery, parseOsmElement, formatAddress, describeOpeningHours, type OsmPlace } from "./engine/osm";
 import { googleTextSearch, gridCells, type GooglePlace } from "./engine/google";
 import { tomtomPoiSearch, type TomTomPlace } from "./engine/tomtom";
+import { runPageSpeed, techFindings, type TechAudit } from "./engine/pagespeed";
 import { CATEGORY_QUERIES } from "./engine/categories";
 import { classifyUrl, normalizeUrl, hostnameOf } from "./engine/classify";
 import { computeOpportunity } from "./engine/scoring";
-import { dedupeKey, haversineKm, normalizeName, onlyDigits } from "./engine/normalize";
+import { dedupeKey, haversineKm, normalizeName, onlyDigits, stripAccents } from "./engine/normalize";
 import { LEAD_STATUS } from "./constants";
 
 export interface SearchParams {
@@ -339,7 +340,7 @@ export const MANUAL_CHECKS: { key: string; label: string }[] = [
 ];
 
 /** Investigação de presença digital + pontuação. `manual` sobrescreve verificações de conteúdo feitas pelo usuário. */
-export async function auditBusiness(businessId: string, manual?: Record<string, boolean | null>) {
+export async function auditBusiness(businessId: string, manual?: Record<string, boolean | null>, options?: { skipTech?: boolean }) {
   const started = performance.now();
   const biz = await db.businesses.get(businessId);
   if (!biz) throw new Error("Estabelecimento não encontrado");
@@ -351,6 +352,10 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
   const previous = (await db.audits.where("business_id").equals(businessId).sortBy("created_at")).pop();
 
   const checks: Record<string, Check> = {};
+  let tech: TechAudit | null = null;
+  let techError: string | null = null;
+  // Reaproveita a auditoria técnica recente (menos de 7 dias) ao salvar o checklist
+  if (options?.skipTech && previous?.tech && Date.now() - new Date(previous.tech.fetched_at).getTime() < 7 * 86400_000) tech = previous.tech;
   if (own) {
     const probe = await probeSite(own.url);
     await recordUsage("site_check", "probe", probe.https_ok);
@@ -361,6 +366,28 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
     checks.own_site = { value: true, evidence: own.url };
     checks.site_online = { value: probe.https_ok ? true : null, evidence: probe.https_ok ? "Servidor respondeu" : "Não confirmado (sem resposta em HTTPS)" };
     checks.https = { value: probe.https_ok, evidence: probe.https_ok ? "Respondeu com conexão segura" : "Não respondeu em HTTPS" };
+    // Auditoria técnica pelo Google (Lighthouse): velocidade, SEO, celular, HTTPS e foto da tela
+    if (settings.tech_audit && !options?.skipTech) {
+      try {
+        tech = await runPageSpeed(own.url, settings.pagespeed_api_key);
+        await recordUsage("pagespeed", "runPagespeed");
+        sources.push({ name: "Google PageSpeed Insights (Lighthouse)", url: `https://pagespeed.web.dev/analysis?url=${encodeURIComponent(own.url)}`, type: "website",
+          result: `Desempenho ${tech.performance ?? "—"} · SEO ${tech.seo ?? "—"} · Acessibilidade ${tech.accessibility ?? "—"}`, at: nowIso() });
+        checks.site_online = { value: true, evidence: "Aberto pelo Google Lighthouse" };
+        if (tech.https_ok != null) checks.https = { value: tech.https_ok, evidence: tech.final_url ?? undefined };
+        own = { ...own, is_online: true, https: tech.https_ok ?? own.https, final_url: tech.final_url };
+        await db.websites.update(own.id, { is_online: true, https: own.https, final_url: tech.final_url, error: null });
+      } catch (e) {
+        await recordUsage("pagespeed", "runPagespeed", false);
+        techError = (e as Error).message;
+        sources.push({ name: "Google PageSpeed Insights", type: "website", result: "Falha: " + techError, at: nowIso() });
+        if (/não conseguiu abrir o site/.test(techError) && !probe.https_ok) {
+          checks.site_online = { value: false, evidence: "O Google não conseguiu abrir o site" };
+          own = { ...own, is_online: false };
+          await db.websites.update(own.id, { is_online: false, error: techError });
+        }
+      }
+    }
   } else {
     checks.own_site = { value: false, evidence: `Não identificado no ${sourceName}` };
   }
@@ -372,6 +399,13 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
     for (const k of CONTENT_CHECKS) {
       const v = manualAll[k];
       checks[k] = v === true || v === false ? { value: v, evidence: "Verificado manualmente", manual: true } : { value: null, evidence: "Não verificado — use o checklist" };
+    }
+    if (tech) {
+      if (!checks.mobile_viewport?.manual && tech.viewport_ok != null) checks.mobile_viewport = { value: tech.viewport_ok, evidence: "Google Lighthouse (viewport)" };
+      if (!checks.embedded_map?.manual && tech.third_parties.some((x) => /google maps/i.test(x))) checks.embedded_map = { value: true, evidence: "Google Maps carregado na página (Lighthouse)" };
+      if (!checks.social_links?.manual && tech.third_parties.some((x) => /facebook|instagram/i.test(x))) checks.social_links = { value: true, evidence: "Recursos do Facebook/Instagram na página (Lighthouse)" };
+      checks.tech_performance = { value: tech.performance != null ? tech.performance >= 50 : null, evidence: tech.performance != null ? `Nota ${tech.performance}/100${tech.lcp_text ? ` · LCP ${tech.lcp_text}` : ""}` : undefined };
+      checks.tech_seo = { value: tech.seo != null ? tech.seo >= 80 : null, evidence: tech.seo != null ? `Nota ${tech.seo}/100` : undefined };
     }
   }
   const contacts = await db.contacts.where("business_id").equals(businessId).toArray();
@@ -393,9 +427,21 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
     checks, hasPhone: !!biz.phone, rating: biz.rating, ratingCount: biz.user_rating_count, sourceName, contentVerified,
   });
   if (!own) result.reasons.push({ kind: "fact", text: `Status baseado no cadastro do ${sourceName}. Se encontrar um site, adicione-o na ficha para reanalisar.`, weight: 0 });
+  // Fatos da auditoria técnica do Google entram na pontuação
+  if (own && tech && own.is_online !== false) {
+    const findings = techFindings(tech);
+    for (const f of findings) {
+      result.score += f.weight;
+      result.reasons.push({ kind: "fact", text: f.text, weight: f.weight });
+      if (f.product && !result.products.includes(f.product)) result.products.push(f.product);
+    }
+    if (findings.some((f) => f.weight >= 12) && (result.status === "has_site" || result.status === "site_pending")) result.status = "site_issues";
+    result.score = Math.min(100, result.score);
+    result.level = result.score >= 60 ? "alta" : result.score >= 30 ? "media" : "baixa";
+  }
 
   const audit: Audit = { id: uid(), business_id: businessId, status: own && !contentVerified ? "partial" : "completed", website_url: own?.url ?? null,
-    website_kind: own ? "own_site" : (websites.find((w) => w.kind !== "unknown")?.kind ?? "unknown"), checks, sources, duration_ms: Math.round(performance.now() - started), error: null, created_at: nowIso() };
+    website_kind: own ? "own_site" : (websites.find((w) => w.kind !== "unknown")?.kind ?? "unknown"), checks, sources, tech, tech_error: techError, duration_ms: Math.round(performance.now() - started), error: null, created_at: nowIso() };
   await db.audits.add(audit);
   await db.opportunities.put({ business_id: businessId, level: result.level, score: result.score, reasons: result.reasons, suggested_products: result.products, updated_at: nowIso() });
   const has = (k: string) => (checks[k]?.value === true ? true : checks[k]?.value === false ? false : null);
@@ -405,6 +451,7 @@ export async function auditBusiness(businessId: string, manual?: Record<string, 
     has_whatsapp: types.has("whatsapp") || has("whatsapp") === true ? true : has("whatsapp"), has_instagram: types.has("instagram") ? true : null,
     has_facebook: types.has("facebook") ? true : null, has_booking: has("online_booking"), has_menu: has("digital_menu"),
     opportunity_level: result.level, opportunity_score: result.score, analyzed_at: nowIso(), updated_at: nowIso(),
+    tech_performance: tech?.performance ?? null, tech_seo: tech?.seo ?? null,
   });
   const lead = await ensureLead(businessId);
   const next = result.level === "baixa" ? "analisado" : "oportunidade";
@@ -522,4 +569,106 @@ export async function leadsWithBusiness() {
   const biz = await db.businesses.bulkGet(leads.map((l) => l.business_id));
   return leads.map((l, i) => ({ ...l, businesses: biz[i] })).filter((l) => l.businesses)
     .sort((a, b) => a.position - b.position || b.updated_at.localeCompare(a.updated_at));
+}
+
+
+export interface ManualBusinessInput {
+  name: string;
+  category?: string;
+  phone?: string;
+  whatsapp?: string;
+  address?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  website?: string;
+  instagram?: string;
+  geocode?: boolean;
+}
+
+/** Cadastro manual (ou importado de planilha) com deduplicação e geocodificação opcional (Nominatim). */
+export async function createManualBusiness(d: ManualBusinessInput): Promise<{ id: string; created: boolean }> {
+  const name = (d.name ?? "").trim().slice(0, 160);
+  if (!name) throw new Error("Informe o nome do estabelecimento");
+  let lat: number | null = null, lng: number | null = null;
+  if (d.geocode && (d.address || d.city)) {
+    try {
+      const g = await nominatimGeocode([d.address, d.neighborhood, d.city, d.state, "Brasil"].filter(Boolean).join(", "));
+      if (g) { lat = g.lat; lng = g.lng; }
+    } catch { /* sem coordenadas */ }
+  }
+  const phone = d.phone?.trim() || null;
+  const key = dedupeKey(name, phone, lat, lng);
+  const norm = nameNorm(name);
+  const all = await db.businesses.toArray();
+  const hit = all.find((x) => x.dedupe_key === key || sameBusiness({ norm: nameNorm(x.name), lat: x.lat, lng: x.lng, phone: x.phone }, { norm, lat, lng, phone })
+    || (norm && nameNorm(x.name) === norm && (x.city ?? "").toLowerCase() === (d.city ?? "").toLowerCase() && !!d.city));
+  if (hit) return { id: hit.id, created: false };
+  const id = uid();
+  const address = [d.address, d.neighborhood, [d.city, d.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ") || null;
+  await db.businesses.add({
+    id, place_id: null, dedupe_key: key, name, category: d.category?.trim() || null, primary_type: null, primary_type_label: null, types: [],
+    formatted_address: address, street: d.address?.trim() || null, street_number: null, neighborhood: d.neighborhood?.trim() || null, city: d.city?.trim() || null,
+    state: d.state?.trim().toUpperCase().slice(0, 2) || null, postal_code: null, country: "Brasil", lat, lng, phone, international_phone: phone,
+    google_maps_uri: lat != null ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + " " + address)}` : null,
+    osm_url: null, places_website_uri: null, rating: null, user_rating_count: null, business_status: "OPERATIONAL", opening_hours: null, source: "manual",
+    digital_status: "unknown", primary_website: null, has_own_site: null, site_online: null, site_https: null, site_has_location: null, site_mobile_ready: null,
+    has_whatsapp: null, has_instagram: null, has_facebook: null, has_booking: null, has_menu: null, opportunity_level: null, opportunity_score: null, analyzed_at: null,
+    created_at: nowIso(), updated_at: nowIso(),
+  });
+  if (phone) await db.contacts.add({ id: uid(), business_id: id, type: "phone", value: phone, url: `tel:${phone.replace(/[^\d+]/g, "")}`, source: "manual" });
+  if (d.whatsapp?.trim()) {
+    const w = d.whatsapp.replace(/\D/g, "");
+    await db.contacts.add({ id: uid(), business_id: id, type: "whatsapp", value: w, url: w.length >= 10 ? `https://wa.me/${w.length <= 11 ? "55" + w : w}` : null, source: "manual" });
+  }
+  if (d.website?.trim()) await setBusinessWebsite(id, d.website.trim()).catch(() => {});
+  if (d.instagram?.trim()) {
+    const ig = d.instagram.trim().startsWith("http") ? d.instagram.trim() : `https://instagram.com/${d.instagram.trim().replace(/^@/, "")}`;
+    await setBusinessWebsite(id, ig).catch(() => {});
+  }
+  await ensureLead(id, "novo");
+  await logActivity("business.created", { type: "business", id }, { name, source: "manual" });
+  return { id, created: true };
+}
+
+/** Lê CSV (separador ; ou ,) com cabeçalho. Colunas reconhecidas por nome, sem diferenciar acentos/maiúsculas. */
+export function parseCsv(text: string): Record<string, string>[] {
+  const clean = text.replace(/^\ufeff/, "");
+  const firstLine = clean.split(/\r?\n/)[0] ?? "";
+  const sep = (firstLine.match(/;/g)?.length ?? 0) >= (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", q = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (q) {
+      if (ch === '"' && clean[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === sep) { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && clean[i + 1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const norm = (h: string) => stripAccents(h.toLowerCase()).replace(/[^a-z]/g, "");
+  const header = (rows.shift() ?? []).map(norm);
+  return rows.filter((r) => r.some((c) => c.trim())).map((r) => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? "").trim()])));
+}
+
+export function csvRowToInput(r: Record<string, string>): ManualBusinessInput {
+  const pick = (...keys: string[]) => keys.map((k) => r[k]).find((v) => v && v.trim()) ?? "";
+  return {
+    name: pick("nome", "nomefantasia", "estabelecimento", "empresa", "name", "razaosocial"),
+    category: pick("categoria", "segmento", "ramo", "category"),
+    phone: pick("telefone", "fone", "phone", "celular"),
+    whatsapp: pick("whatsapp", "zap"),
+    address: pick("endereco", "logradouro", "address", "rua"),
+    neighborhood: pick("bairro"),
+    city: pick("cidade", "municipio", "city"),
+    state: pick("uf", "estado", "state"),
+    website: pick("site", "website", "url"),
+    instagram: pick("instagram", "insta"),
+  };
 }

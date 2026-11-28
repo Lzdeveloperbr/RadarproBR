@@ -68,6 +68,8 @@ export const CHECK_LABELS: Record<string, string> = {
   social_links: "Links para redes sociais",
   opening_hours: "Horário de funcionamento no site",
   shared_domain: "Domínio compartilhado (duplicado)",
+  tech_performance: "Velocidade no celular (Google)",
+  tech_seo: "SEO técnico (Google)",
   name_match: "Nome confere com a página",
   phone_match: "Telefone confere com a página",
   phone_places: "Telefone público no cadastro",

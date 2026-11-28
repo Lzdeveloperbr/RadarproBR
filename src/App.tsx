@@ -28,6 +28,7 @@ const DataPage = named(() => import("./pages/Admin"), "DataPage");
 const BatchPage = named(() => import("./pages/Batch"), "BatchPage");
 const BatchDetailPage = named(() => import("./pages/Batch"), "BatchDetailPage");
 const ComparePage = named(() => import("./pages/Compare"), "ComparePage");
+const ProspectPage = named(() => import("./pages/Prospect"), "ProspectPage");
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } } });
 
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="analise" element={<DigitalAnalysisPage />} />
                 <Route path="lote" element={<BatchPage />} />
                 <Route path="lote/:id" element={<BatchDetailPage />} />
+                <Route path="prospectar" element={<ProspectPage />} />
                 <Route path="crm" element={<CrmPage />} />
                 <Route path="kanban" element={<KanbanPage />} />
                 <Route path="agenda" element={<AgendaPage />} />

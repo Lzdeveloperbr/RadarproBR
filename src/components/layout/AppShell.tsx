@@ -2,10 +2,12 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { clsx } from "clsx";
 import {
-  LayoutDashboard, Radar, Map, ListChecks, Users, KanbanSquare, FileText, Wand2, History, Star, BarChart3,
+  LayoutDashboard, Radar, Zap, Map, ListChecks, Users, KanbanSquare, FileText, Wand2, History, Star, BarChart3,
   Plug, Settings, UserCircle, ShieldCheck, Menu, X, Layers, ScanSearch, CalendarClock, GitCompare, Search,
 } from "lucide-react";
 import { Logo } from "./Logo";
+import { Welcome } from "./Welcome";
+import { useTaskReminders } from "../../hooks/useTaskReminders";
 import { useSettings } from "../../hooks/useSettings";
 
 const NAV = [
@@ -18,6 +20,7 @@ const NAV = [
     { to: "/lote", label: "Pesquisa em lote", icon: Layers },
   ]},
   { group: "Vendas", items: [
+    { to: "/prospectar", label: "Modo prospecção", icon: Zap },
     { to: "/crm", label: "CRM", icon: Users },
     { to: "/kanban", label: "Kanban", icon: KanbanSquare },
     { to: "/agenda", label: "Agenda", icon: CalendarClock },
@@ -40,7 +43,7 @@ const NAV = [
 const BOTTOM = [
   { to: "/", label: "Início", icon: LayoutDashboard, end: true },
   { to: "/pesquisa", label: "Pesquisar", icon: Radar },
-  { to: "/mapa", label: "Mapa", icon: Map },
+  { to: "/prospectar", label: "Prospectar", icon: Zap },
   { to: "/kanban", label: "CRM", icon: KanbanSquare },
 ];
 
@@ -80,6 +83,7 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell() {
+  useTaskReminders();
   const [open, setOpen] = useState(false);
   const [quick, setQuick] = useState("");
   const loc = useLocation();
@@ -113,6 +117,7 @@ export function AppShell() {
         <NavLink to="/resultados" className="sm:hidden ml-auto rounded-lg p-2 text-ink-200 hover:bg-white/5" aria-label="Buscar"><Search className="size-5" /></NavLink>
       </header>
 
+      <Welcome />
       <main className="mx-auto max-w-[1500px] px-4 py-6 pb-28 sm:px-6 lg:pb-10">
         <Outlet />
       </main>

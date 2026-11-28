@@ -9,6 +9,7 @@ import { db, ensureLead } from "../lib/db";
 import { Button, Card, EmptyState, PageHeader, PageLoader, Tabs } from "../components/ui";
 import { FilterPanel } from "../components/FilterPanel";
 import { BusinessList } from "../components/BusinessList";
+import { AddBusinessButton, ImportCsvButton } from "../components/AddBusiness";
 import { MapView, MapLegend } from "../components/MapView";
 import { businessRows, exportCSV, exportPDFTable, exportXLSX } from "../lib/export";
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -82,7 +83,9 @@ export function ResultsPage() {
         <Button size="sm" icon={ScanSearch} onClick={analyze} disabled={!target.length}>Analisar {selected.size ? "selecionados" : "todos"}</Button>
         <Button size="sm" variant="secondary" icon={Star} onClick={prioritize} disabled={!target.length}>Prioritários</Button>
         <Button size="sm" variant="secondary" icon={GitCompare} disabled={selected.size < 2 || selected.size > 4} onClick={() => nav(`/comparar?ids=${[...selected].join(",")}`)}>Comparar</Button>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <AddBusinessButton />
+          <ImportCsvButton />
           <Button size="sm" variant="ghost" icon={Download} onClick={() => exportCSV(businessRows(target), name)}>CSV</Button>
           <Button size="sm" variant="ghost" icon={FileSpreadsheet} onClick={() => exportXLSX([{ name: "Estabelecimentos", rows: businessRows(target) }], name)}>Excel</Button>
           <Button size="sm" variant="ghost" icon={FileDown} onClick={() => exportPDFTable("Estabelecimentos encontrados", businessRows(target), ["Nome", "Categoria", "Cidade", "Telefone", "Site", "Presença digital", "Oportunidade", "Pontuação"], name)}>PDF</Button>

@@ -32,11 +32,13 @@ function LeafletMap({ businesses, onSelect, selectedId, className, circle, onMap
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
     const map = L.map(ref.current, { zoomControl: true, attributionControl: true }).setView([-15.78, -47.93], 4);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: "abcd",
-      maxZoom: 20,
-    }).addTo(map);
+    const attr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+    const carto = '&copy; <a href="https://carto.com/attributions">CARTO</a>';
+    const dark = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: `${attr} ${carto}`, subdomains: "abcd", maxZoom: 20 });
+    const light = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { attribution: `${attr} ${carto}`, subdomains: "abcd", maxZoom: 20 });
+    const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: attr, maxZoom: 19 });
+    dark.addTo(map);
+    L.control.layers({ "Escuro": dark, "Claro (ruas)": light, "OpenStreetMap": osm }, undefined, { position: "topright" }).addTo(map);
     clusterRef.current = (L as any).markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 });
     map.addLayer(clusterRef.current);
     map.on("click", (e: L.LeafletMouseEvent) => clickRef.current?.(e.latlng.lat, e.latlng.lng));

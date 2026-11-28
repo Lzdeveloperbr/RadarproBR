@@ -49,7 +49,10 @@ export function generateMessage(kind: MessageKind, b: Business, o: Opportunity |
       "## Resumo",
       `${b.name} é ${b.category ? `um estabelecimento da categoria ${b.category.toLowerCase()}` : "um estabelecimento"}${where ? ` localizado em ${where}` : ""}. ` +
         (b.primary_website ? `Foi identificado o site ${b.primary_website}.` : "Não foi identificado um site próprio nas fontes consultadas.") +
-        (b.has_instagram ? " Possui presença no Instagram." : "") + (b.phone ? ` Telefone público: ${b.phone}.` : ""), "",
+        (b.has_instagram ? " Possui presença no Instagram." : "") + (b.phone ? ` Telefone público: ${b.phone}.` : "") +
+        (b.cnpj_data?.data_abertura ? ` Empresa aberta em ${new Date(b.cnpj_data.data_abertura + "T12:00:00").getFullYear()}${b.cnpj_data.situacao ? ` (situação ${b.cnpj_data.situacao.toLowerCase()})` : ""}${b.cnpj_data.porte ? `, porte ${b.cnpj_data.porte.toLowerCase()}` : ""}.` : "") +
+        (b.rating != null ? ` Nota ${b.rating} no Google com ${b.user_rating_count} avaliações.` : "") +
+        (b.tech_performance != null ? ` Desempenho do site no celular: ${b.tech_performance}/100 (Google).` : ""), "",
       "## Fatos verificados",
       ...(f.length ? f.map((x) => `- ${x}`) : ["- Ainda sem análise digital — execute a análise na ficha."]),
       b.opening_hours?.weekdayDescriptions ? `- Horário publicado: ${b.opening_hours.weekdayDescriptions.join("; ")}` : "", "",

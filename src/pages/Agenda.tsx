@@ -45,7 +45,10 @@ export function AgendaPage() {
   };
   return (
     <>
-      <PageHeader title="Agenda de prospecção" subtitle="Tarefas, retornos e painel de produtividade" icon={CalendarClock} />
+      <PageHeader title="Agenda de prospecção" subtitle="Tarefas, retornos e painel de produtividade" icon={CalendarClock}
+        actions={typeof Notification !== "undefined" && Notification.permission !== "granted" ? (
+          <button className="chip" onClick={async () => { const p = await Notification.requestPermission(); if (p === "granted") new Notification("Lembretes ativados", { body: "Você será avisado 15 minutos antes das tarefas (com o app aberto)." }); }}>Ativar lembretes de tarefas</button>
+        ) : undefined} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4">
         <StatCard label="Contatos (7 dias)" value={q.data.contacts} icon={PhoneCall} accent />
         <StatCard label="Tarefas concluídas (7 dias)" value={q.data.done} icon={CheckCircle2} />

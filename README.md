@@ -43,6 +43,16 @@ A chave de navegador fica visível no código da página — por isso a restriç
 - Navegadores não permitem ler o conteúdo de outros sites; por isso a ficha tem um **checklist** (WhatsApp, endereço, mapa, agendamento, cardápio, versão para celular...). Ao preencher, a pontuação é recalculada com fatos verificados por você.
 - Status usa “Site não identificado”, nunca “não possui site”. Motivos marcados como **fato verificado** ou **estimativa**.
 
+### Ferramentas gratuitas integradas
+| Recurso | Fonte gratuita |
+|---|---|
+| Auditoria técnica do site (velocidade, SEO, acessibilidade, celular, foto da tela) | Google PageSpeed Insights / Lighthouse (sem chave; chave gratuita opcional) |
+| Lista oficial de cidades e população estimada | API do IBGE |
+| Dados da empresa (situação, abertura, porte, atividade) | BrasilAPI — Receita Federal (sócios não são armazenados) |
+| Site demonstração pronto para o cliente (HTML com mapa e WhatsApp) | Gerado no navegador |
+| Modo prospecção (fila de WhatsApp com registro no CRM) | wa.me |
+| Lembretes de tarefas | Notificações do navegador |
+
 ### Seus dados
 Ficam salvos apenas no navegador. Em **Dados e backup** você pode baixar um backup (.json), restaurar em outro aparelho e proteger o armazenamento contra limpeza automática.
 

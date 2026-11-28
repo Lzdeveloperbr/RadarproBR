@@ -44,8 +44,35 @@ export interface Business {
   opportunity_level: OpportunityLevel | null;
   opportunity_score: number | null;
   analyzed_at: string | null;
+  /** Notas do Google Lighthouse (0–100) da última auditoria técnica. */
+  tech_performance?: number | null;
+  tech_seo?: number | null;
+  /** Dados públicos da Receita Federal (BrasilAPI), sem sócios. */
+  cnpj?: string | null;
+  cnpj_data?: CnpjData | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CnpjData {
+  cnpj: string;
+  razao_social: string | null;
+  nome_fantasia: string | null;
+  situacao: string | null;
+  data_abertura: string | null;
+  porte: string | null;
+  natureza_juridica: string | null;
+  cnae_principal: string | null;
+  capital_social: number | null;
+  endereco: string | null;
+  municipio: string | null;
+  uf: string | null;
+  cep: string | null;
+  telefone: string | null;
+  email: string | null;
+  simples: boolean | null;
+  mei: boolean | null;
+  fetched_at: string;
 }
 
 export interface Check { value: boolean | null; evidence?: string; manual?: boolean }
@@ -58,6 +85,8 @@ export interface Audit {
   website_kind: string | null;
   checks: Record<string, Check>;
   sources: Source[];
+  tech?: import("./engine/pagespeed").TechAudit | null;
+  tech_error?: string | null;
   duration_ms: number | null;
   error: string | null;
   created_at: string;
@@ -208,6 +237,9 @@ export interface UserSettings {
   /** Chave de navegador do Google (opcional, substitui a do site). */
   google_api_key: string | null;
   search_source: "auto" | "both" | "google" | "tomtom" | "osm";
+  /** Auditoria técnica automática (Google PageSpeed Insights). */
+  tech_audit: boolean;
+  pagespeed_api_key: string | null;
   /** Chave da TomTom (opcional, substitui a do site). */
   tomtom_api_key: string | null;
   /** Tamanho máximo da grade de consultas do Google por categoria (n×n). */

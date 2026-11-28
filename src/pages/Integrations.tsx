@@ -5,6 +5,7 @@ import { Badge, Button, Card, PageHeader } from "../components/ui";
 import { db, getSettings } from "../lib/db";
 import { googleKey, tomtomKey } from "../lib/services";
 import { tomtomPoiSearch } from "../lib/engine/tomtom";
+import { runPageSpeed } from "../lib/engine/pagespeed";
 import { googleTextSearch, gridCells } from "../lib/engine/google";
 import { Link } from "react-router-dom";
 import { fmtNumber } from "../lib/format";
@@ -35,7 +36,7 @@ export function IntegrationsPage() {
       const since = new Date(Date.now() - 30 * 86400_000).toISOString();
       const rows = await db.usage.where("created_at").above(since).toArray();
       const agg = (p: string) => ({ total: rows.filter((r) => r.provider === p).length, errors: rows.filter((r) => r.provider === p && !r.success).length });
-      return { osm: agg("openstreetmap"), site: agg("site_check"), google: agg("google"), tomtom: agg("tomtom"), hasGoogle: !!googleKey((await getSettings()).google_api_key), hasTomTom: !!tomtomKey((await getSettings()).tomtom_api_key) };
+      return { osm: agg("openstreetmap"), site: agg("site_check"), google: agg("google"), tomtom: agg("tomtom"), pagespeed: agg("pagespeed"), hasGoogle: !!googleKey((await getSettings()).google_api_key), hasTomTom: !!tomtomKey((await getSettings()).tomtom_api_key) };
     },
   });
   const runTests = async () => {
@@ -56,12 +57,16 @@ export function IntegrationsPage() {
       try { const r = await tomtomPoiSearch(tk, "padaria", -23.55, -46.63, 2000, 10); tt = { state: "connected", message: `TomTom respondeu (${r.length} resultados no teste)` }; }
       catch (e: any) { tt = { state: "error", message: e.message }; }
     }
-    setResults({ nominatim: nom, overpass: ovp, google: goo, tomtom: tt });
+    let ps: Status;
+    try { const r = await runPageSpeed("https://www.example.com/", (await getSettings()).pagespeed_api_key); ps = { state: "connected", message: `Google Lighthouse respondeu (desempenho ${r.performance ?? "—"})` }; }
+    catch (e: any) { ps = { state: "error", message: e.message }; }
+    setResults({ nominatim: nom, overpass: ovp, google: goo, tomtom: tt, pagespeed: ps });
     setTesting(false);
   };
   const items = [
     { key: "tomtom", title: "TomTom Search (gratuita, sem cartão)", icon: Search, desc: usage.data?.hasTomTom ? "Chave configurada. Base comercial de estabelecimentos com telefone e site." : "Recomendada: crie uma chave grátis em developer.tomtom.com e cole em Configurações.", usage: usage.data?.tomtom },
     { key: "google", title: "Google Places (a mais completa)", icon: Search, desc: usage.data?.hasGoogle ? "Chave configurada. Mais estabelecimentos, notas, avaliações, telefone e site." : "Opcional. Configure a chave em Configurações → Fontes de dados para encontrar muito mais.", usage: usage.data?.google },
+    { key: "pagespeed", title: "Google PageSpeed Insights (Lighthouse)", icon: Globe2, desc: "Auditoria técnica gratuita dos sites: velocidade, SEO, acessibilidade, celular e foto da tela.", usage: usage.data?.pagespeed },
     { key: "overpass", title: "OpenStreetMap — Overpass API", icon: Search, desc: "Pesquisa de estabelecimentos por categoria e raio. Gratuita, sem chave.", usage: usage.data?.osm },
     { key: "nominatim", title: "OpenStreetMap — Nominatim", icon: Globe2, desc: "Localiza cidades e bairros (coordenadas e área do município). Gratuita, sem chave." },
   ];

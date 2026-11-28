@@ -12,7 +12,7 @@ export function ManualChecklist({ businessId, url, checks, onDone }: { businessI
   const save = async () => {
     setSaving(true);
     try {
-      const r = await auditBusiness(businessId, vals);
+      const r = await auditBusiness(businessId, vals, { skipTech: true });
       toast.success(`Checklist salvo · pontuação ${r.opportunity.score}`);
       onDone();
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }

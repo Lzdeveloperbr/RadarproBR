@@ -6,7 +6,9 @@ import { fmtMoney } from "./format";
 
 export interface Seller { name?: string | null; company?: string | null; email?: string | null; phone?: string | null; whatsapp?: string | null; website?: string | null; footer?: string | null }
 
-export function buildProposalPdf(p: { title: string; businessName: string; contactName?: string | null; template: string; content: ProposalContent; seller: Seller; createdAt?: string }) {
+export interface PdfTech { performance: number | null; seo: number | null; accessibility: number | null; best_practices: number | null; lcp_text: string | null; viewport_ok: boolean | null; screenshot: string | null; url: string }
+
+export function buildProposalPdf(p: { title: string; businessName: string; contactName?: string | null; template: string; content: ProposalContent; seller: Seller; createdAt?: string; tech?: PdfTech | null }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -38,6 +40,32 @@ export function buildProposalPdf(p: { title: string; businessName: string; conta
   };
   const c = p.content;
   section("Diagnóstico digital"); para(c.diagnosis || "—");
+  if (p.tech) {
+    const t = p.tech;
+    section("Avaliação técnica do site (Google Lighthouse, celular)");
+    const box = (label: string, v: number | null, x: number) => {
+      const col: [number, number, number] = v == null ? [140, 140, 140] : v >= 90 ? [52, 168, 83] : v >= 50 ? [230, 160, 0] : [220, 53, 69];
+      doc.setDrawColor(...col); doc.setLineWidth(3); doc.circle(x + 22, y + 18, 18, "S");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...col);
+      doc.text(v == null ? "—" : String(v), x + 22, y + 22, { align: "center" });
+      doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(90, 90, 90);
+      doc.text(label, x + 22, y + 48, { align: "center" });
+    };
+    ensure(70);
+    box("Desempenho", t.performance, 32); box("SEO", t.seo, 102); box("Acessibilidade", t.accessibility, 172); box("Boas práticas", t.best_practices, 242);
+    y += 64;
+    para([`Site analisado: ${t.url}`, t.lcp_text ? `Tempo para exibir o conteúdo principal no celular: ${t.lcp_text}.` : "", t.viewport_ok === false ? "O site não está adaptado para telas de celular." : ""].filter(Boolean).join(" "));
+    if (t.screenshot) {
+      try {
+        const imgW = 120, imgH = 240;
+        ensure(imgH + 24);
+        doc.addImage(t.screenshot, "JPEG", (W - imgW) / 2, y, imgW, imgH);
+        doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+        doc.text("Como o site aparece hoje no celular", W / 2, y + imgH + 12, { align: "center" });
+        y += imgH + 26;
+      } catch { /* imagem inválida: ignora */ }
+    }
+  }
   if (c.problems.length) { section("Problemas identificados"); bullets(c.problems); }
   section("Solução recomendada"); para(c.solution);
   if (c.features.length) { section("Funcionalidades propostas"); bullets(c.features); }

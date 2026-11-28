@@ -8,6 +8,7 @@ import { useBatchRunner } from "../hooks/useBatchRunner";
 import { Button, Card, CardHeader, Field, PageHeader, Toggle } from "../components/ui";
 import { CategoryPicker } from "../components/CategoryPicker";
 import { MapView } from "../components/MapView";
+import { CityInput } from "../components/CityInput";
 import { DIGITAL_FILTERS, UFS } from "../lib/constants";
 
 const EXAMPLES = [
@@ -82,7 +83,7 @@ export function NewSearchPage() {
                   {UFS.map(([uf, n]) => <option key={uf} value={uf}>{n} ({uf})</option>)}
                 </select>
               </Field>
-              <Field label="3. Cidade"><input className="input" placeholder="Ex.: São José do Rio Preto" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} /></Field>
+              <Field label="3. Cidade"><CityInput uf={f.state} value={f.city} onChange={(city) => setF({ ...f, city })} /></Field>
               <Field label="4. Bairro (opcional)"><input className="input" placeholder="Ex.: Centro" value={f.neighborhood} onChange={(e) => setF({ ...f, neighborhood: e.target.value })} /></Field>
               <Field label={`6. Raio de pesquisa: ${f.radius} km`} hint="Até 50 km. Resultados fora do raio são descartados.">
                 <input type="range" min={1} max={50} value={f.radius} onChange={(e) => setF({ ...f, radius: Number(e.target.value) })} className="w-full accent-lime-400" />

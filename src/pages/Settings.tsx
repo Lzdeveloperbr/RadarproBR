@@ -107,7 +107,15 @@ export function SettingsPage() {
             <Field label="Cidade"><input className="input" value={s.default_city ?? ""} onChange={(e) => set({ default_city: e.target.value || null })} /></Field>
             <Field label="Raio padrão (km)"><input type="number" min={1} max={50} className="input" value={s.default_radius_km} onChange={(e) => set({ default_radius_km: Math.min(50, Math.max(1, Number(e.target.value) || 10)) })} /></Field>
             <Field label="Máximo de resultados"><input type="number" min={1} max={300} className="input" value={s.default_max_results} onChange={(e) => set({ default_max_results: Math.min(300, Math.max(1, Number(e.target.value) || 60)) })} /></Field>
-            <div className="sm:col-span-2 pt-1"><Toggle checked={s.auto_audit} onChange={(v) => set({ auto_audit: v })} label="Analisar presença digital automaticamente após cada pesquisa" /></div>
+            <div className="sm:col-span-2 pt-1 space-y-3">
+              <Toggle checked={s.auto_audit} onChange={(v) => set({ auto_audit: v })} label="Analisar presença digital automaticamente após cada pesquisa" />
+              <Toggle checked={s.tech_audit} onChange={(v) => set({ tech_audit: v })} label="Auditoria técnica dos sites pelo Google (velocidade, SEO, celular e foto da tela)" />
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Chave do PageSpeed Insights (opcional, gratuita)" hint="Sem chave funciona com uma cota compartilhada. Uma chave gratuita (sem cartão) no Google Cloud aumenta o limite: ative a 'PageSpeed Insights API' e crie uma chave.">
+                <input className="input font-mono" type="password" autoComplete="off" placeholder="Opcional" value={s.pagespeed_api_key ?? ""} onChange={(e) => set({ pagespeed_api_key: e.target.value.trim() || null })} />
+              </Field>
+            </div>
           </div>
         </Card>
         <Card>

@@ -71,3 +71,5 @@ body {
 .marker-cluster div { background: rgba(198,244,50,.9); color: #08090c; font-weight: 700; }
 .marker-cluster { background: rgba(198,244,50,.25); }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.leaflet-control-layers { background: #11141a !important; color: #e4e8ef !important; border: 1px solid rgba(255,255,255,.08) !important; border-radius: 12px !important; }
+.leaflet-control-layers-toggle { filter: invert(1) hue-rotate(180deg); }

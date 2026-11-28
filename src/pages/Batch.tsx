@@ -8,6 +8,7 @@ import { useSettings } from "../hooks/useSettings";
 import { useBatchRunner, type ItemPayload } from "../hooks/useBatchRunner";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, PageHeader, PageLoader, ProgressBar, Toggle } from "../components/ui";
 import { CategoryPicker } from "../components/CategoryPicker";
+import { CityInput } from "../components/CityInput";
 import { UFS } from "../lib/constants";
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 import { fmtDateTime } from "../lib/format";
@@ -34,6 +35,7 @@ export function BatchPage() {
   const runner = useBatchRunner();
   const nav = useNavigate();
   const [cities, setCities] = useState("");
+  const [pick, setPick] = useState("");
   const [state, setState] = useState(settings.default_state ?? "");
   const [cats, setCats] = useState<string[]>([]);
   const [radius, setRadius] = useState(15);
@@ -73,7 +75,13 @@ export function BatchPage() {
           <CardHeader title="Novo lote" icon={Radar} subtitle={`${total} pesquisa(s) · até ${total * max} estabelecimentos`} />
           <div className="px-5 pb-5 space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Cidades (uma por linha)"><textarea className="input min-h-28" placeholder={"São José do Rio Preto\nVotuporanga\nFernandópolis"} value={cities} onChange={(e) => setCities(e.target.value)} /></Field>
+              <div>
+                <Field label="Cidades (uma por linha)"><textarea className="input min-h-28" placeholder={"São José do Rio Preto\nVotuporanga\nFernandópolis"} value={cities} onChange={(e) => setCities(e.target.value)} /></Field>
+                <div className="mt-2 flex gap-2">
+                  <div className="flex-1"><CityInput uf={state} value={pick} onChange={setPick} placeholder="Buscar cidade no IBGE para adicionar" showPopulation={false} /></div>
+                  <Button size="sm" variant="secondary" onClick={() => { if (pick.trim()) { setCities((c) => (c.trim() ? c.trim() + "\n" : "") + pick.trim()); setPick(""); } }}>Adicionar</Button>
+                </div>
+              </div>
               <div className="space-y-3">
                 <Field label="Estado"><select className="input" value={state} onChange={(e) => setState(e.target.value)}><option value="">—</option>{UFS.map(([uf, n]) => <option key={uf} value={uf}>{n}</option>)}</select></Field>
                 <div className="grid grid-cols-2 gap-3">

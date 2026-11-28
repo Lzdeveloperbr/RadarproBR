@@ -60,7 +60,7 @@ export function computeOpportunity(input: ScoringInput): ScoringResult {
         kind: "fact",
         text: input.webSearchUsed
           ? `Site próprio não identificado no ${input.sourceName ?? "Google Places"} nem na busca na web`
-          : `Site próprio não identificado no ${input.sourceName ?? "Google Places"} (busca na web não configurada)`,
+          : `Site próprio não identificado no cadastro (${input.sourceName ?? "Google Places"})`,
         weight: 45,
       });
     } else {

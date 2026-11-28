@@ -99,7 +99,9 @@ export function ProposalEditorPage() {
     queryFn: async () => {
       const [b, o] = await Promise.all([db.businesses.get(businessId!), db.opportunities.get(businessId!)]);
       const l = b ? await ensureLead(b.id) : null;
-      return { b: b ?? null, o: o ?? null, l };
+      const audits = await db.audits.where("business_id").equals(businessId!).toArray();
+      const tech = audits.filter((a) => a.tech).sort((x, y) => y.created_at.localeCompare(x.created_at))[0]?.tech ?? null;
+      return { b: b ?? null, o: o ?? null, l, tech };
     },
   });
 
@@ -151,7 +153,8 @@ export function ProposalEditorPage() {
     toast.success(status === "sent" ? "Proposta marcada como enviada e CRM atualizado" : "Proposta salva");
     return row;
   };
-  const pdf = () => buildProposalPdf({ title, businessName, contactName: contact, template, content: c, seller });
+  const [includeTech, setIncludeTech] = useState(true);
+  const pdf = () => buildProposalPdf({ title, businessName, contactName: contact, template, content: c, seller, tech: includeTech ? biz.data?.tech ?? null : null });
   const fileName = `proposta-${businessName.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.pdf`;
   const text = () => proposalText({ title, businessName, contactName: contact, content: c, seller });
   const share = async () => {
@@ -233,6 +236,12 @@ export function ProposalEditorPage() {
               <Button className="w-full" variant="secondary" icon={MessageCircle} disabled={!biz.data?.b?.phone}>Abrir WhatsApp</Button>
             </a>
             <Button className="w-full" variant="outline" icon={Send} loading={saving} onClick={() => save("sent")}>Marcar como enviada</Button>
+            {biz.data?.tech && (
+              <label className="flex items-center gap-2 pt-1 text-xs text-ink-300">
+                <input type="checkbox" className="accent-lime-400" checked={includeTech} onChange={(e) => setIncludeTech(e.target.checked)} />
+                Incluir avaliação técnica do Google e foto do site no PDF
+              </label>
+            )}
             <div className="pt-3 text-xs text-ink-400">
               <div className="label">Dados do vendedor no PDF</div>
               {seller.name || seller.company ? <p>{[seller.name, seller.company, seller.phone, seller.email].filter(Boolean).join(" · ")}</p> : <p>Configure seus dados em <Link to="/configuracoes" className="text-lime-400 hover:underline">Configurações</Link>.</p>}
